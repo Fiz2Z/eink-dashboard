@@ -10,7 +10,7 @@ import {
   ymd,
   holidaysInMonth,
   supportedHolidayYears,
-} from "../data/cn-holidays.js";
+} from "../holidays/cn-holidays.js";
 
 const RED = "#E60000";
 const WEEK = ["一", "二", "三", "四", "五", "六", "日"];

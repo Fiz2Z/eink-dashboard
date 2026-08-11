@@ -24,7 +24,7 @@ If you use or redistribute **EPD-nRF5 firmware or its original web sources**, yo
 
 ## Holiday data
 
-`js/data/cn-holidays.js` encodes PRC public holiday / makeup-work schedules from
+`js/holidays/cn-holidays.js` encodes PRC public holiday / makeup-work schedules from
 State Council General Office notices (e.g. 国办发明电〔2025〕7号 for year 2026),
 as republished on government portals such as
 [beijing.gov.cn](https://www.beijing.gov.cn/cs/gncs/zcwj/202603/t20260327_4568275.html).

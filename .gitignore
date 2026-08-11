@@ -3,7 +3,8 @@ Thumbs.db
 *.log
 .env
 .env.*
-data/
+# local runtime only (do not ignore js/holidays/)
+/data/
 .idea/
 .vscode/
 *.swp
