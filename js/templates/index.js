@@ -4,11 +4,17 @@
  * 2. 在本文件 import 并加入 templates 数组
  */
 import { tokenTemplate } from "./token.js";
+import { calendarTemplate } from "./calendar.js";
 import { statusTemplate } from "./status.js";
 import { quoteTemplate } from "./quote.js";
 
 /** @type {import('./base.js') extends never ? any : Array} */
-export const templates = [tokenTemplate, statusTemplate, quoteTemplate];
+export const templates = [
+  tokenTemplate,
+  calendarTemplate,
+  statusTemplate,
+  quoteTemplate,
+];
 
 export function getTemplate(id) {
   return templates.find((t) => t.id === id) || templates[0];

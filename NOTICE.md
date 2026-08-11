@@ -22,6 +22,14 @@ If you use or redistribute **EPD-nRF5 firmware or its original web sources**, yo
 - [waveshareteam/e-Paper](https://github.com/waveshareteam/e-Paper) — e-paper driver examples  
 - [ZinggJM/GxEPD2](https://github.com/ZinggJM/GxEPD2) — Arduino e-paper library (used upstream by many EPD projects)
 
+## Holiday data
+
+`js/data/cn-holidays.js` encodes PRC public holiday / makeup-work schedules from
+State Council General Office notices (e.g. 国办发明电〔2025〕7号 for year 2026),
+as republished on government portals such as
+[beijing.gov.cn](https://www.beijing.gov.cn/cs/gncs/zcwj/202603/t20260327_4568275.html).
+Official texts remain authoritative; this file is a convenience for offline e-ink rendering.
+
 ## Brand icons
 
 Monochrome SVG marks under `assets/icons/` are sourced from public icon collections
