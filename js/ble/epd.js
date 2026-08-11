@@ -67,6 +67,77 @@ export function quantizeCanvasToBw(canvas, threshold = 160) {
   return imageData;
 }
 
+/**
+ * Quantize to pure white / black / red (for BWR e-ink preview + packing).
+ * Red if R is clearly dominant; else black if dark; else white.
+ */
+export function quantizeCanvasBwRed(canvas, { darkThreshold = 140, redRatio = 1.35 } = {}) {
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const d = imageData.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const r = d[i];
+    const g = d[i + 1];
+    const b = d[i + 2];
+    const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+    const isRed = r > 120 && r > g * redRatio && r > b * redRatio;
+    if (isRed) {
+      d[i] = 230;
+      d[i + 1] = 0;
+      d[i + 2] = 0;
+    } else if (lum < darkThreshold) {
+      d[i] = d[i + 1] = d[i + 2] = 0;
+    } else {
+      d[i] = d[i + 1] = d[i + 2] = 255;
+    }
+    d[i + 3] = 255;
+  }
+  ctx.putImageData(imageData, 0, 0);
+  return imageData;
+}
+
+/**
+ * Pack canvas into EPD black + red planes (1 = white/off, 0 = pigment on).
+ * - Black plane: black pixels → 0; white & red → 1
+ * - Red plane: red pixels → 0; white & black → 1
+ */
+export function canvasToBwRedPlanes(canvas) {
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  const { width, height, data } = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const bytesPerRow = Math.ceil(width / 8);
+  const bw = new Uint8Array(bytesPerRow * height);
+  const red = new Uint8Array(bytesPerRow * height);
+  let oi = 0;
+
+  for (let y = 0; y < height; y++) {
+    for (let xb = 0; xb < bytesPerRow; xb++) {
+      let bwByte = 0;
+      let redByte = 0;
+      for (let bit = 0; bit < 8; bit++) {
+        const x = xb * 8 + bit;
+        let isBlack = false;
+        let isRed = false;
+        if (x < width) {
+          const i = (y * width + x) * 4;
+          const r = data[i];
+          const g = data[i + 1];
+          const b = data[i + 2];
+          const lum = 0.299 * r + 0.587 * g + 0.114 * b;
+          isRed = r > 120 && r > g * 1.35 && r > b * 1.35;
+          isBlack = !isRed && lum < 140;
+        }
+        // 1 = white/off on that plane
+        bwByte = (bwByte << 1) | (isBlack ? 0 : 1);
+        redByte = (redByte << 1) | (isRed ? 0 : 1);
+      }
+      bw[oi] = bwByte;
+      red[oi] = redByte;
+      oi++;
+    }
+  }
+  return { bw, red };
+}
+
 /** Official non-RLE flags: first 0x0F, rest 0xFF for BW */
 function writeImgFlag(isFirst, { red = false, rle = false, rleMode = false } = {}) {
   if (rleMode) {
@@ -451,27 +522,31 @@ export class EpdBleClient {
   /**
    * Push image.
    * @param {Uint8Array} packedBw 1-bit BW plane (0=black, 1=white)
-   * @param {{ colorMode?: 'bw'|'threeColor', mtu?: number, interleaved?: number, chunkDelayMs?: number, onProgress?: Function }} opts
+   * @param {{ colorMode?: 'bw'|'threeColor', packedRed?: Uint8Array, mtu?: number, interleaved?: number, chunkDelayMs?: number, onProgress?: Function }} opts
    *
-   * threeColor: also sends a full-white red plane (0xFF). Missing/dirty red plane
-   * is the usual cause of "random red dots" on BWR panels.
+   * threeColor: sends red plane from `packedRed` if provided; otherwise all-white
+   * red plane (clears residual red speckles).
    */
   async pushBwImage(packedBw, opts = {}) {
     const colorMode = opts.colorMode || "threeColor";
     const mtu = opts.mtu ?? this.mtu ?? 244;
     const interleaved = opts.interleaved ?? 0;
+    const packedRed =
+      opts.packedRed instanceof Uint8Array && opts.packedRed.length === packedBw.length
+        ? opts.packedRed
+        : null;
 
     const sinceReady = Date.now() - (this._readyAt || 0);
     if (sinceReady < 300) await sleep(300 - sinceReady);
 
     this.onLog(
-      `传输参数: 模式=${colorMode}, MTU≈${mtu}, 交错无应答=${interleaved}, BW=${packedBw.length}B`
+      `传输参数: 模式=${colorMode}, MTU≈${mtu}, 交错无应答=${interleaved}, BW=${packedBw.length}B` +
+        (packedRed ? `, RED=${packedRed.length}B` : "")
     );
 
     await this.writeRetry(EpdCmd.INIT, null, true);
     await sleep(200);
 
-    // progress across 1 or 2 planes
     const planes = colorMode === "threeColor" ? 2 : 1;
     await this._pushPlane(packedBw, "bw", {
       ...opts,
@@ -481,9 +556,9 @@ export class EpdBleClient {
     });
 
     if (colorMode === "threeColor") {
-      // 0xFF = white on red plane → no red pixels
-      const redWhite = new Uint8Array(packedBw.length).fill(0xff);
-      await this._pushPlane(redWhite, "red", {
+      // 0xFF = white on red plane; use real red data when provided
+      const redPlane = packedRed || new Uint8Array(packedBw.length).fill(0xff);
+      await this._pushPlane(redPlane, "red", {
         ...opts,
         onProgress: (i, total) => {
           if (opts.onProgress) opts.onProgress(total + i, total * planes, "red");

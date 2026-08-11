@@ -1,4 +1,10 @@
-import { EpdBleClient, canvasToBwPacked, quantizeCanvasToBw } from "./ble/epd.js";
+import {
+  EpdBleClient,
+  canvasToBwPacked,
+  canvasToBwRedPlanes,
+  quantizeCanvasToBw,
+  quantizeCanvasBwRed,
+} from "./ble/epd.js";
 import { templates, getTemplate } from "./templates/index.js";
 
 const $ = (id) => document.getElementById(id);
@@ -154,8 +160,13 @@ async function renderPreview() {
   ctx.restore();
 
   await tpl.render(ctx, els.canvas, cfg);
-  // Pure B/W only — gray AA edges look like red dust on 3-color panels
-  quantizeCanvasToBw(els.canvas, 160);
+  const colorMode = els.colorMode?.value || "threeColor";
+  if (colorMode === "threeColor") {
+    // Keep intentional red; snap gray AA to B/W/R
+    quantizeCanvasBwRed(els.canvas);
+  } else {
+    quantizeCanvasToBw(els.canvas, 160);
+  }
   log(`预览: ${tpl.name}`);
 }
 
@@ -191,13 +202,22 @@ async function onPush() {
     els.btnConnect.disabled = true;
     setBleStatus("推送中…", "busy");
     await renderPreview();
-    const packed = canvasToBwPacked(els.canvas, 160);
     const colorMode = els.colorMode?.value || "threeColor";
+    let packed;
+    let packedRed = null;
+    if (colorMode === "threeColor") {
+      const planes = canvasToBwRedPlanes(els.canvas);
+      packed = planes.bw;
+      packedRed = planes.red;
+    } else {
+      packed = canvasToBwPacked(els.canvas, 160);
+    }
     log(`位图 ${packed.length} bytes，模式=${colorMode}，开始传输…`);
     const t0 = performance.now();
     const interleaved = Number(els.interleaved.value);
     await client.pushBwImage(packed, {
       colorMode,
+      packedRed,
       mtu: Number(els.mtuSize.value) || client.mtu || 244,
       interleaved: Number.isFinite(interleaved) ? interleaved : 0,
       chunkDelayMs: 4,
