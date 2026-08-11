@@ -22,6 +22,13 @@ If you use or redistribute **EPD-nRF5 firmware or its original web sources**, yo
 - [waveshareteam/e-Paper](https://github.com/waveshareteam/e-Paper) — e-paper driver examples  
 - [ZinggJM/GxEPD2](https://github.com/ZinggJM/GxEPD2) — Arduino e-paper library (used upstream by many EPD projects)
 
+## Brand icons
+
+Monochrome SVG marks under `assets/icons/` are sourced from public icon collections
+([Simple Icons](https://simpleicons.org/), [Lobe Icons](https://github.com/lobehub/lobe-icons)) for identification only.
+OpenAI, Anthropic, Claude, xAI, Grok, DeepSeek and related marks are trademarks of their respective owners.
+This project is unofficial and not affiliated with those companies.
+
 ## Trademark / product note
 
 “E-ink / 墨水屏” product names remain with their respective owners. This repository is unofficial community software.

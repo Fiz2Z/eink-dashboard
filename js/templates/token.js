@@ -1,19 +1,50 @@
 /**
- * AI Token usage dashboard — layout inspired by multi-provider token card
- * (header / total / 2×2 provider cards / limit footer).
- * Uses pure black / white / red (#E60000) for 3-color e-ink.
+ * AI Token usage dashboard — multi-provider card layout.
+ * Brand icons: assets/icons/*.svg (Simple Icons / Lobe Icons style marks).
  */
 
 const RED = "#E60000";
 const MONTHS = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"];
 
+/** @type {Map<string, HTMLImageElement>} */
+const iconCache = new Map();
+
+const ICON_PATHS = {
+  codex: "assets/icons/openai.svg",
+  claude: "assets/icons/anthropic.svg",
+  grok: "assets/icons/grok.svg",
+  deepseek: "assets/icons/deepseek.svg",
+};
+
+function loadIcon(src) {
+  if (iconCache.has(src)) {
+    const cached = iconCache.get(src);
+    if (cached.complete && cached.naturalWidth > 0) return Promise.resolve(cached);
+  }
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.decoding = "async";
+    img.onload = () => {
+      iconCache.set(src, img);
+      resolve(img);
+    };
+    img.onerror = () => reject(new Error(`图标加载失败: ${src}`));
+    // cache-bust only on first load path; keep stable for e-ink offline docker
+    img.src = src;
+  });
+}
+
+async function ensureIcons() {
+  await Promise.all(Object.values(ICON_PATHS).map((p) => loadIcon(p).catch(() => null)));
+}
+
 export const tokenTemplate = {
   id: "token",
   name: "AI Token 用量",
   description:
-    "多厂商 Token 看板：总额 + 四宫格（Codex / Claude / Grok / DeepSeek）+ 额度与重置倒计时。红条需「三色」模式。",
+    "多厂商 Token 看板（官方风格图标）：总额 + Codex/Claude/Grok/DeepSeek + 额度。红条需「三色」模式。",
   defaults: {
-    dateLabel: "", // empty = today MON DD
+    dateLabel: "",
     total: "2480000",
     limit: "3500000",
     resetDays: "20",
@@ -34,11 +65,14 @@ export const tokenTemplate = {
   ],
 
   async render(ctx, canvas, config) {
+    await ensureIcons();
+
     const W = canvas.width;
     const H = canvas.height;
-    const s = Math.min(W / 400, H / 300); // scale vs design ref 400×300
+    const s = Math.min(W / 400, H / 300);
 
-    ctx.imageSmoothingEnabled = false;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
     ctx.fillStyle = "#fff";
     ctx.fillRect(0, 0, W, H);
 
@@ -47,10 +81,10 @@ export const tokenTemplate = {
     const totalPct = Math.min(100, Math.round((total / limit) * 100));
 
     const providers = [
-      { id: "codex", name: "CODEX", value: num(config.codex), drawIcon: drawIconCodex },
-      { id: "claude", name: "CLAUDE", value: num(config.claude), drawIcon: drawIconClaude },
-      { id: "grok", name: "GROK", value: num(config.grok), drawIcon: drawIconGrok },
-      { id: "deepseek", name: "DEEPSEEK", value: num(config.deepseek), drawIcon: drawIconDeepSeek },
+      { id: "codex", name: "CODEX", value: num(config.codex), icon: ICON_PATHS.codex },
+      { id: "claude", name: "CLAUDE", value: num(config.claude), icon: ICON_PATHS.claude },
+      { id: "grok", name: "GROK", value: num(config.grok), icon: ICON_PATHS.grok },
+      { id: "deepseek", name: "DEEPSEEK", value: num(config.deepseek), icon: ICON_PATHS.deepseek },
     ];
     const sum = providers.reduce((a, p) => a + p.value, 0) || 1;
     providers.forEach((p) => {
@@ -63,7 +97,7 @@ export const tokenTemplate = {
     const gap = Math.max(4, Math.round(6 * s));
     const border = Math.max(2, Math.round(3 * s));
 
-    // —— Header bar ——
+    // Header
     ctx.fillStyle = "#000";
     ctx.fillRect(0, 0, W, headerH);
     ctx.fillStyle = "#fff";
@@ -74,13 +108,12 @@ export const tokenTemplate = {
     const dw = ctx.measureText(dateStr).width;
     ctx.fillText(dateStr, W - m - 2 - dw, headerH / 2);
 
-    // —— Outer frame ——
     const bodyTop = headerH;
     const bodyBot = H - footerH;
     const bodyH = bodyBot - bodyTop;
     strokeRect(ctx, m, bodyTop + m, W - m * 2, bodyH - m * 2, border);
 
-    // —— TOTAL card ——
+    // TOTAL card
     const totalY = bodyTop + m + gap;
     const totalH = Math.max(48, Math.round(62 * s));
     const totalX = m + gap;
@@ -95,23 +128,17 @@ export const tokenTemplate = {
 
     const totalText = formatCompact(total);
     setFont(ctx, Math.max(28, Math.round(40 * s)), "900");
-    const totalTw = ctx.measureText(totalText).width;
-    // leave room for badge on the right
     const badgeW = Math.max(52, Math.round(64 * s));
     const badgeH = Math.max(28, Math.round(36 * s));
     const badgeX = totalX + totalW - Math.round(8 * s) - badgeW;
     const badgeY = totalY + (totalH - badgeH) / 2;
-    const totalNumX = totalX + Math.round(10 * s) + Math.round(78 * s);
-    // center-ish large number between TOTAL label and badge
-    let numX = totalNumX;
-    if (numX + totalTw > badgeX - 8) {
-      // scale down font if overflow
+    let numX = totalX + Math.round(10 * s) + Math.round(78 * s);
+    if (numX + ctx.measureText(totalText).width > badgeX - 8) {
       setFont(ctx, Math.max(22, Math.round(32 * s)), "900");
     }
     ctx.fillStyle = "#000";
     ctx.fillText(totalText, numX, ty);
 
-    // red % badge
     roundFill(ctx, badgeX, badgeY, badgeW, badgeH, Math.round(6 * s), RED);
     ctx.fillStyle = "#fff";
     setFont(ctx, Math.max(16, Math.round(22 * s)), "800");
@@ -119,12 +146,11 @@ export const tokenTemplate = {
     const pw = ctx.measureText(pctStr).width;
     ctx.fillText(pctStr, badgeX + (badgeW - pw) / 2, badgeY + badgeH / 2);
 
-    // —— 2×2 provider cards ——
+    // 2×2 cards
     const gridTop = totalY + totalH + gap;
     const gridBot = bodyBot - m - gap;
     const gridLeft = totalX;
-    const gridRight = totalX + totalW;
-    const gridW = gridRight - gridLeft;
+    const gridW = totalW;
     const gridH = gridBot - gridTop;
     const cellW = (gridW - gap) / 2;
     const cellH = (gridH - gap) / 2;
@@ -140,10 +166,9 @@ export const tokenTemplate = {
       drawProviderCard(ctx, x, y, cellW, cellH, p, s, border);
     }
 
-    // —— Footer bar (limit / reset) ——
+    // Footer
     const fy = H - footerH;
     strokeRect(ctx, m, fy, W - m * 2, footerH - m, border);
-    // fill footer background white already; draw text
     setFont(ctx, Math.max(12, Math.round(15 * s)), "800");
     ctx.fillStyle = "#000";
     ctx.textBaseline = "middle";
@@ -159,16 +184,24 @@ function drawProviderCard(ctx, x, y, w, h, p, s, border) {
   strokeRect(ctx, x, y, w, h, border);
 
   const pad = Math.max(6, Math.round(8 * s));
-  const iconSize = Math.max(22, Math.round(28 * s));
+  const iconSize = Math.max(22, Math.round(30 * s));
   const iconX = x + pad;
-  const iconY = y + pad + 2;
+  const iconY = y + pad + Math.round(2 * s);
 
-  ctx.save();
-  ctx.translate(iconX, iconY);
-  p.drawIcon(ctx, iconSize);
-  ctx.restore();
+  const img = iconCache.get(p.icon);
+  if (img && img.complete && img.naturalWidth > 0) {
+    // Draw monochrome brand mark
+    ctx.save();
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(img, iconX, iconY, iconSize, iconSize);
+    ctx.restore();
+  } else {
+    // fallback box
+    ctx.strokeStyle = "#000";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(iconX, iconY, iconSize, iconSize);
+  }
 
-  // name + value row
   const textX = iconX + iconSize + Math.round(8 * s);
   setFont(ctx, Math.max(13, Math.round(16 * s)), "800");
   ctx.fillStyle = "#000";
@@ -178,13 +211,11 @@ function drawProviderCard(ctx, x, y, w, h, p, s, border) {
   setFont(ctx, Math.max(16, Math.round(20 * s)), "800");
   ctx.fillText(formatCompact(p.value), textX, y + pad + Math.round(18 * s));
 
-  // percent on right
   setFont(ctx, Math.max(13, Math.round(16 * s)), "700");
   const pct = `${p.pct}%`;
   const pctW = ctx.measureText(pct).width;
   ctx.fillText(pct, x + w - pad - pctW, y + pad + Math.round(10 * s));
 
-  // progress bar
   const barX = x + pad;
   const barW = w - pad * 2;
   const barH = Math.max(8, Math.round(10 * s));
@@ -193,7 +224,6 @@ function drawProviderCard(ctx, x, y, w, h, p, s, border) {
   const fillW = Math.max(0, Math.floor((barW * Math.min(100, p.pct)) / 100));
   if (fillW > 0) {
     ctx.fillStyle = RED;
-    // inset fill slightly so border stays black
     const inset = Math.max(1, Math.round(1 * s));
     ctx.fillRect(barX + inset, barY + inset, Math.max(0, fillW - inset * 2), barH - inset * 2);
   }
@@ -227,7 +257,6 @@ function num(v) {
   return Number.isFinite(n) ? n : 0;
 }
 
-/** 2480000 → 2.48M , 986000 → 986K */
 function formatCompact(n) {
   n = Math.abs(Number(n) || 0);
   if (n >= 1e9) return trimNum(n / 1e9) + "B";
@@ -244,83 +273,4 @@ function trimNum(x) {
 function defaultDateLabel() {
   const d = new Date();
   return `${MONTHS[d.getMonth()]} ${d.getDate()}`;
-}
-
-/* —— simplified brand marks (not official trademarks, geometric hints) —— */
-
-function drawIconCodex(ctx, size) {
-  // interlocking loops (OpenAI-like)
-  ctx.strokeStyle = "#000";
-  ctx.lineWidth = Math.max(2, size * 0.12);
-  ctx.lineCap = "round";
-  const c = size / 2;
-  const r = size * 0.28;
-  for (let i = 0; i < 3; i++) {
-    const a = (i * Math.PI * 2) / 3;
-    const cx = c + Math.cos(a) * size * 0.12;
-    const cy = c + Math.sin(a) * size * 0.12;
-    ctx.beginPath();
-    ctx.ellipse(cx, cy, r, r * 0.55, a, 0, Math.PI * 2);
-    ctx.stroke();
-  }
-}
-
-function drawIconClaude(ctx, size) {
-  // stylized "A*" mark
-  ctx.fillStyle = "#000";
-  setFont(ctx, size * 0.72, "900");
-  ctx.textBaseline = "middle";
-  ctx.textAlign = "center";
-  ctx.fillText("A", size / 2, size / 2 + 1);
-  ctx.textAlign = "start";
-  // small star
-  const sx = size * 0.72;
-  const sy = size * 0.28;
-  ctx.beginPath();
-  for (let i = 0; i < 4; i++) {
-    const a = (i * Math.PI) / 2 - Math.PI / 4;
-    const r = i % 2 === 0 ? size * 0.12 : size * 0.05;
-    const px = sx + Math.cos(a) * r;
-    const py = sy + Math.sin(a) * r;
-    if (i === 0) ctx.moveTo(px, py);
-    else ctx.lineTo(px, py);
-  }
-  ctx.closePath();
-  ctx.fill();
-}
-
-function drawIconGrok(ctx, size) {
-  // bold X
-  ctx.strokeStyle = "#000";
-  ctx.lineWidth = Math.max(3, size * 0.16);
-  ctx.lineCap = "square";
-  const p = size * 0.18;
-  ctx.beginPath();
-  ctx.moveTo(p, p);
-  ctx.lineTo(size - p, size - p);
-  ctx.moveTo(size - p, p);
-  ctx.lineTo(p, size - p);
-  ctx.stroke();
-}
-
-function drawIconDeepSeek(ctx, size) {
-  // whale silhouette
-  ctx.fillStyle = "#000";
-  ctx.beginPath();
-  // body
-  ctx.ellipse(size * 0.48, size * 0.55, size * 0.32, size * 0.2, 0, 0, Math.PI * 2);
-  ctx.fill();
-  // tail
-  ctx.beginPath();
-  ctx.moveTo(size * 0.72, size * 0.5);
-  ctx.lineTo(size * 0.95, size * 0.28);
-  ctx.lineTo(size * 0.88, size * 0.55);
-  ctx.lineTo(size * 0.95, size * 0.78);
-  ctx.closePath();
-  ctx.fill();
-  // eye
-  ctx.fillStyle = "#fff";
-  ctx.beginPath();
-  ctx.arc(size * 0.32, size * 0.5, size * 0.05, 0, Math.PI * 2);
-  ctx.fill();
 }
