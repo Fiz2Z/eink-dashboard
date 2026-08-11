@@ -1,0 +1,9 @@
+services:
+  eink-dashboard:
+    image: ghcr.io/fiz2z/eink-dashboard:latest
+    build: .
+    container_name: eink-dashboard
+    ports:
+      # Host 8080 → container 80 (change left side if busy)
+      - "8080:80"
+    restart: unless-stopped

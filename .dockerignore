@@ -1,0 +1,13 @@
+.git
+.github
+.gitignore
+**/.DS_Store
+**/Thumbs.db
+*.log
+data/
+deploy_remote.py
+finish_deploy.py
+nginx-eink.conf
+.dockerignore
+Dockerfile
+docker-compose.yml

@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>E-Ink Dashboard</title>
+  <link rel="stylesheet" href="css/app.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <h1>E-Ink Dashboard</h1>
+      <span class="tag">EPD-nRF5 兼容 · 预设模板可切换</span>
+    </div>
+    <div class="ble-status" id="bleStatus">未连接</div>
+  </header>
+
+  <main class="layout">
+    <!-- 左侧：模板 + 配置 -->
+    <section class="panel controls">
+      <h2>模板</h2>
+      <label class="field">
+        <span>当前模板</span>
+        <select id="templateSelect"></select>
+      </label>
+      <p class="hint" id="templateDesc"></p>
+
+      <h2>屏幕</h2>
+      <label class="field">
+        <span>分辨率</span>
+        <select id="canvasSize">
+          <option value="400x300" selected>4.2″ · 400×300</option>
+          <option value="300x400">4.2″ 竖屏 · 300×400</option>
+          <option value="600x448">5.83″ · 600×448</option>
+          <option value="800x480">7.5″ · 800×480</option>
+          <option value="640x384">7.5″ · 640×384</option>
+          <option value="792x272">5.79″ · 792×272</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>颜色模式</span>
+        <select id="colorMode">
+          <option value="threeColor" selected>三色（黑白红）— 推荐，可清红点</option>
+          <option value="bw">仅黑白双色</option>
+        </select>
+      </label>
+      <p class="hint">背景有红点时请选「三色」再推送一次（会清空红色层）。纯黑白屏再改「仅黑白」。</p>
+
+      <h2>模板参数</h2>
+      <div id="configForm" class="config-form"></div>
+
+      <div class="actions">
+        <button type="button" id="btnPreview" class="btn">刷新预览</button>
+        <button type="button" id="btnConnect" class="btn primary">连接蓝牙</button>
+        <button type="button" id="btnPush" class="btn accent" disabled>推送到墨水屏</button>
+      </div>
+
+      <details class="advanced">
+        <summary>高级 / BLE</summary>
+        <label class="field">
+          <span>MTU</span>
+          <input id="mtuSize" type="number" value="244" min="20" max="512" />
+        </label>
+        <label class="field">
+          <span>交错无应答包数</span>
+          <input id="interleaved" type="number" value="0" min="0" max="500" />
+        </label>
+        <p class="hint">MTU 连接后自动更新。交错无应答建议先保持 <b>0</b>（最稳）；传稳后再试 20～50 加速。Windows 上无应答连发容易 GATT 失败。</p>
+      </details>
+
+      <h2>日志</h2>
+      <pre id="log" class="log"></pre>
+    </section>
+
+    <!-- 右侧：预览 -->
+    <section class="panel preview">
+      <div class="preview-header">
+        <h2>预览</h2>
+        <span id="previewMeta" class="meta">400 × 300</span>
+      </div>
+      <div class="canvas-wrap">
+        <canvas id="canvas" width="400" height="300"></canvas>
+      </div>
+      <p class="hint">预览为 1-bit 黑白效果。推送使用与 EPD-nRF5 相同的 BLE 协议（INIT → WRITE_IMG → REFRESH）。</p>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>MIT · 协议兼容</span>
+    <a href="https://github.com/tsl0922/EPD-nRF5" target="_blank" rel="noreferrer">EPD-nRF5</a>
+    ·
+    <a href="https://github.com/Fiz2Z/eink-dashboard" target="_blank" rel="noreferrer">GitHub</a>
+    ·
+    <a href="README.md">模板说明</a>
+  </footer>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

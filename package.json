@@ -1,0 +1,16 @@
+{
+  "name": "eink-dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Template-based Web Bluetooth host for EPD-nRF5 e-ink displays",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Fiz2Z/eink-dashboard.git"
+  },
+  "license": "MIT",
+  "scripts": {
+    "start": "npx --yes serve -l 8080 .",
+    "docker:build": "docker build -t ghcr.io/fiz2z/eink-dashboard:local .",
+    "docker:run": "docker run --rm -p 8080:80 ghcr.io/fiz2z/eink-dashboard:local"
+  }
+}
