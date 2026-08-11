@@ -112,6 +112,19 @@ body {
   font-size: 0.8rem;
 }
 
+.field.checkbox span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text);
+  font-size: 0.9rem;
+}
+
+.field.checkbox input[type="checkbox"] {
+  width: auto;
+  accent-color: var(--primary);
+}
+
 select,
 input[type="text"],
 input[type="number"],

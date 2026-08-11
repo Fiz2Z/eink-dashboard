@@ -24,6 +24,8 @@ const els = {
   log: $("log"),
   mtuSize: $("mtuSize"),
   interleaved: $("interleaved"),
+  showAllBle: $("showAllBle"),
+  namePrefixes: $("namePrefixes"),
 };
 
 /** @type {Record<string, object>} */
@@ -180,7 +182,18 @@ async function onConnect() {
     els.btnConnect.disabled = true;
     els.btnPush.disabled = true;
     setBleStatus("连接中…", "busy");
-    await client.connect();
+    const prefixes = String(els.namePrefixes?.value || "NRF_EPD,EPD")
+      .split(/[,，\s]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    await client.connect({
+      showAllDevices: !!els.showAllBle?.checked,
+      namePrefixes: prefixes,
+      preferRemembered: true,
+    });
+    if (client.deviceName) {
+      log(`已连接: ${client.deviceName}`);
+    }
     syncConnectUi();
   } catch (e) {
     log(`连接失败: ${e.message || e}`);

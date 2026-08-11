@@ -182,31 +182,73 @@ export class EpdBleClient {
     return this.device?.name || "";
   }
 
-  async connect() {
+  /**
+   * @param {{
+   *   showAllDevices?: boolean,
+   *   namePrefixes?: string[],
+   *   preferRemembered?: boolean,
+   * }} [opts]
+   *
+   * Default: only show devices whose name starts with NRF_EPD / EPD
+   * (much shorter chooser list on Bluefy / Android). Use showAllDevices
+   * if your panel uses a custom BLE name.
+   */
+  async connect(opts = {}) {
     if (!navigator.bluetooth) {
       throw new Error("当前浏览器不支持 Web Bluetooth，请用 Chrome / Edge");
     }
+
+    const showAll = !!opts.showAllDevices;
+    const namePrefixes =
+      opts.namePrefixes?.length > 0
+        ? opts.namePrefixes
+        : ["NRF_EPD", "EPD", "nRF_EPD", "epd"];
+    const preferRemembered = opts.preferRemembered !== false;
 
     this._connecting = true;
     this._intentionalDisconnect = false;
 
     try {
       this.onStatus("选择设备…");
-      let device;
-      try {
-        device = await navigator.bluetooth.requestDevice({
-          optionalServices: [EPD_SERVICE],
-          // Prefer named ESL if browser supports filters + fallback
-          acceptAllDevices: true,
-        });
-      } catch (e) {
-        const msg = String(e.message || e);
-        if (/cancel/i.test(msg)) {
-          throw new Error("已取消选择设备（在弹窗里点了取消或关闭）");
+      let device = null;
+
+      // 1) Silent reconnect to a previously authorized device (Chrome / some WebBLE)
+      if (preferRemembered && typeof navigator.bluetooth.getDevices === "function") {
+        try {
+          const known = await navigator.bluetooth.getDevices();
+          const match = known.find((d) => {
+            const n = d.name || "";
+            return namePrefixes.some((p) => n.startsWith(p)) || this._isRememberedDevice(d);
+          });
+          if (match) {
+            this.onLog(`尝试重连已授权设备: ${match.name || match.id}`);
+            device = match;
+          }
+        } catch {
+          /* getDevices not available / denied */
         }
-        throw e;
       }
 
+      // 2) Chooser with name filters (short list) or all devices
+      if (!device) {
+        try {
+          device = await this._requestDevice({ showAll, namePrefixes });
+        } catch (e) {
+          const msg = String(e.message || e);
+          if (/cancel/i.test(msg)) {
+            throw new Error("已取消选择设备（在弹窗里点了取消或关闭）");
+          }
+          // If filter returns empty / not found, offer clearer hint
+          if (!showAll && /no.*device|not found|None of the/i.test(msg)) {
+            throw new Error(
+              "未找到名称以 NRF_EPD / EPD 开头的设备。可在高级选项勾选「显示全部蓝牙设备」再试，或确认墨水屏已唤醒。"
+            );
+          }
+          throw e;
+        }
+      }
+
+      this._rememberDevice(device);
       this.device = device;
       this._bindDisconnectHandler();
 
@@ -309,6 +351,71 @@ export class EpdBleClient {
     await sleep(100);
     await this.write(EpdCmd.INIT, null, true);
     await sleep(450); // allow config + mtu notify
+  }
+
+  async _requestDevice({ showAll, namePrefixes }) {
+    const optionalServices = [EPD_SERVICE];
+
+    if (showAll) {
+      this.onLog("设备选择：显示全部蓝牙设备");
+      return navigator.bluetooth.requestDevice({
+        acceptAllDevices: true,
+        optionalServices,
+      });
+    }
+
+    // Web Bluetooth: filters shorten the picker list (esp. helpful on Bluefy)
+    const filters = namePrefixes.map((namePrefix) => ({ namePrefix }));
+    // Also match by advertised EPD service UUID when present in ADV
+    filters.push({ services: [EPD_SERVICE] });
+
+    this.onLog(
+      `设备选择：仅显示 ${namePrefixes.join(" / ")}* 或广播 EPD 服务的设备`
+    );
+
+    try {
+      return await navigator.bluetooth.requestDevice({
+        filters,
+        optionalServices,
+      });
+    } catch (e) {
+      // Some stacks reject "services" filter if not advertised — retry name-only
+      const msg = String(e.message || e);
+      if (/filter|services|invalid|not supported/i.test(msg)) {
+        this.onLog("服务 UUID 过滤不受支持，改用名称前缀过滤…");
+        return navigator.bluetooth.requestDevice({
+          filters: namePrefixes.map((namePrefix) => ({ namePrefix })),
+          optionalServices,
+        });
+      }
+      throw e;
+    }
+  }
+
+  _rememberDevice(device) {
+    try {
+      const payload = {
+        id: device.id || "",
+        name: device.name || "",
+        at: Date.now(),
+      };
+      localStorage.setItem("eink.ble.lastDevice", JSON.stringify(payload));
+    } catch {
+      /* private mode */
+    }
+  }
+
+  _isRememberedDevice(device) {
+    try {
+      const raw = localStorage.getItem("eink.ble.lastDevice");
+      if (!raw) return false;
+      const saved = JSON.parse(raw);
+      if (saved.id && device.id && saved.id === device.id) return true;
+      if (saved.name && device.name && saved.name === device.name) return true;
+    } catch {
+      /* ignore */
+    }
+    return false;
   }
 
   _bindDisconnectHandler() {

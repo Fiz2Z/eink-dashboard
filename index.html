@@ -57,6 +57,20 @@
 
       <details class="advanced">
         <summary>高级 / BLE</summary>
+        <label class="field checkbox">
+          <span>
+            <input id="showAllBle" type="checkbox" />
+            显示全部蓝牙设备
+          </span>
+        </label>
+        <p class="hint">
+          默认只列出名称以 <b>NRF_EPD</b> / <b>EPD</b> 开头的设备，Bluefy 里更好找。
+          找不到屏时再勾选「显示全部」。浏览器安全限制下，每次连接仍可能要点一次确认。
+        </p>
+        <label class="field">
+          <span>名称前缀过滤（逗号分隔）</span>
+          <input id="namePrefixes" type="text" value="NRF_EPD,EPD" placeholder="NRF_EPD,EPD" />
+        </label>
         <label class="field">
           <span>MTU</span>
           <input id="mtuSize" type="number" value="244" min="20" max="512" />
@@ -65,7 +79,7 @@
           <span>交错无应答包数</span>
           <input id="interleaved" type="number" value="0" min="0" max="500" />
         </label>
-        <p class="hint">MTU 连接后自动更新。交错无应答建议先保持 <b>0</b>（最稳）；传稳后再试 20～50 加速。Windows 上无应答连发容易 GATT 失败。</p>
+        <p class="hint">MTU 连接后自动更新。交错无应答建议先保持 <b>0</b>（最稳）。</p>
       </details>
 
       <h2>日志</h2>
