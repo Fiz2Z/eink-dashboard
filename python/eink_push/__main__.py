@@ -115,6 +115,20 @@ async def build_image_async(cfg: dict[str, Any], args: argparse.Namespace):
         log.info("Render from API: %s", data)
         return quantize_bw_red(render_token(w, h, data))
 
+    if source in ("cc_switch", "cc-switch", "ccswitch"):
+        from .cc_switch import default_db_path, fetch_today_usage
+
+        cs = cfg.get("cc_switch") or {}
+        db = cs.get("db_path") or default_db_path()
+        include_cache = bool(cs.get("include_cache", False))
+        data = fetch_today_usage(Path(db), include_cache=include_cache)
+        # limit still from config (CC Switch has no quota field)
+        base = merge_token_data(cfg)
+        if data.get("limit") is None:
+            data["limit"] = base.get("limit") or 1
+        log.info("Render from CC Switch today: %s", data)
+        return quantize_bw_red(render_token(w, h, data))
+
     data = merge_token_data(cfg)
     log.info("Render demo token dashboard %sx%s", w, h)
     return quantize_bw_red(render_token(w, h, data))
@@ -232,14 +246,22 @@ def build_parser() -> argparse.ArgumentParser:
     )
 
     s = sub.add_parser("preview", help="Render image only (no BLE)")
-    s.add_argument("--source", choices=["demo", "api", "image"], default=None)
+    s.add_argument(
+        "--source",
+        choices=["demo", "api", "image", "cc_switch"],
+        default=None,
+    )
     s.add_argument("--image", default=None)
     s.add_argument("--width", type=int, default=None)
     s.add_argument("--height", type=int, default=None)
     s.add_argument("--out", default="preview.png")
 
     s = sub.add_parser("push", help="Render + BLE push")
-    s.add_argument("--source", choices=["demo", "api", "image"], default=None)
+    s.add_argument(
+        "--source",
+        choices=["demo", "api", "image", "cc_switch"],
+        default=None,
+    )
     s.add_argument("--image", default=None)
     s.add_argument("--width", type=int, default=None)
     s.add_argument("--height", type=int, default=None)

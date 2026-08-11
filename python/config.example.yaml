@@ -15,8 +15,13 @@ display:
   # threeColor | bw
   color_mode: threeColor
 
-# 画面来源：demo | api | image
-source: demo
+# 画面来源：demo | api | image | cc_switch
+# cc_switch = 读取本机 ~/.cc-switch/cc-switch.db 的「当天」用量
+source: cc_switch
+
+cc_switch:
+  db_path: ""          # 空 = ~/.cc-switch/cc-switch.db
+  include_cache: false # 是否计入 cache tokens
 
 # source: api 时
 api:

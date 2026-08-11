@@ -51,9 +51,30 @@ copy config.example.yaml config.yaml
 python -m eink_push -c config.yaml push
 ```
 
-### 4. 从 API 拉用量再推
+### 4. 从 CC Switch「当天」用量推（推荐）
 
-`config.yaml`：
+CC Switch 把统计写在本机 SQLite：`%USERPROFILE%\.cc-switch\cc-switch.db`。
+
+```yaml
+source: cc_switch
+cc_switch:
+  include_cache: false   # 默认只计 input+output
+token:
+  limit: 35000000        # 额度上限自己填（库里没有）
+```
+
+```bash
+# 先看图
+python -m eink_push -c config.yaml preview --source cc_switch
+
+# 再推屏
+python -m eink_push -c config.yaml push --source cc_switch --color-mode threeColor --settle 25
+```
+
+厂商映射：`app_type` codex→CODEX 格，claude→Claude，grok/grokbuild→Grok，deepseek→DeepSeek。  
+**只汇总当天**（本机本地日期）。
+
+### 5. 从 HTTP API 拉用量再推
 
 ```yaml
 source: api
@@ -61,20 +82,6 @@ api:
   url: "https://your.api/token-usage"
   headers:
     Authorization: "Bearer xxx"
-```
-
-接口 JSON 示例：
-
-```json
-{
-  "total": 2480000,
-  "limit": 3500000,
-  "reset_days": 20,
-  "codex": 986000,
-  "claude": 742000,
-  "grok": 496000,
-  "deepseek": 256000
-}
 ```
 
 ```bash
