@@ -157,11 +157,26 @@ eink-dashboard/
 
 ---
 
+## 电脑后台推送（Python）
+
+不依赖浏览器，适合任务计划每小时推屏：
+
+```bash
+cd python
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+python -m eink_push scan
+python -m eink_push push --source demo
+```
+
+详见 [python/README.md](./python/README.md)（bleak + Pillow，协议兼容 EPD-nRF5）。
+
 ## 路线图（后续迭代）
 
-- [ ] 更多预设模板（天气 / 待办 / 日历摘要）
-- [ ] 数据源插件（HTTP API / 本地文件）
-- [ ] 可选定时推送旁路（宿主机脚本 + BLE）
+- [x] 电脑后台推送（Python + bleak）
+- [ ] 更多预设模板（天气 / 待办）
+- [ ] 数据源插件完善
 - [ ] 官方 dithering / RLE 完整对齐
 
 欢迎 Issue / PR。

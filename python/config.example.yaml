@@ -1,0 +1,44 @@
+# 复制为 config.yaml 后修改
+# cp config.example.yaml config.yaml
+
+ble:
+  # 设备名包含此字符串即可（也可用 address 精确匹配）
+  name_prefix: "NRF_EPD"
+  # Windows 上可用: python -m eink_push scan 查看
+  # address: "XX:XX:XX:XX:XX:XX"
+  address: ""
+  scan_timeout: 12
+  connect_retries: 5
+
+display:
+  width: 400
+  height: 300
+  # threeColor | bw
+  color_mode: threeColor
+
+# 画面来源：demo | api | image
+source: demo
+
+# source: api 时
+api:
+  url: "https://example.com/api/token-usage"
+  # 可选
+  headers:
+    # Authorization: "Bearer YOUR_TOKEN"
+  timeout: 30
+
+# source: image 时用本地图片路径
+image_path: ""
+
+# source: demo / api 时的默认字段（api 会覆盖同名字段）
+token:
+  total: 2480000
+  limit: 3500000
+  reset_days: 20
+  codex: 986000
+  claude: 742000
+  grok: 496000
+  deepseek: 256000
+
+# 推送前把预览图存一份（可选）
+save_preview: "preview.png"

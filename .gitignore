@@ -5,6 +5,11 @@ Thumbs.db
 .env.*
 # local runtime only (do not ignore js/holidays/)
 /data/
+python/.venv/
+python/config.yaml
+python/preview.png
+python/**/__pycache__/
+python/**/*.pyc
 .idea/
 .vscode/
 *.swp
