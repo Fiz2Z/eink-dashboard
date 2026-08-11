@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,59 @@ MONTHS = [
     "NOV",
     "DEC",
 ]
+
+# Map provider key -> icon stem (assets/icons/{stem}.png)
+ICON_STEM = {
+    "CODEX": "openai",
+    "CLAUDE": "anthropic",
+    "GROK": "grok",
+    "DEEPSEEK": "deepseek",
+}
+
+
+def _icon_dirs() -> list[Path]:
+    here = Path(__file__).resolve()
+    # python/eink_push/render_token.py -> repo root assets/icons
+    repo_icons = here.parents[2] / "assets" / "icons"
+    local = here.parents[1] / "assets" / "icons"
+    cwd = Path.cwd() / "assets" / "icons"
+    cwd2 = Path.cwd().parent / "assets" / "icons"
+    return [repo_icons, local, cwd, cwd2]
+
+
+@lru_cache(maxsize=8)
+def load_icon(stem: str, size: int) -> Image.Image | None:
+    """Load PNG (preferred) or fail gracefully."""
+    for d in _icon_dirs():
+        for ext in (".png", ".PNG"):
+            p = d / f"{stem}{ext}"
+            if p.is_file():
+                im = Image.open(p).convert("RGBA")
+                im = im.resize((size, size), Image.Resampling.LANCZOS)
+                return _to_black_alpha(im)
+    return None
+
+
+def _to_black_alpha(im: Image.Image) -> Image.Image:
+    """Any opaque pixel -> black (e-ink friendly)."""
+    px = im.load()
+    w, h = im.size
+    for y in range(h):
+        for x in range(w):
+            r, g, b, a = px[x, y]
+            if a < 16:
+                px[x, y] = (0, 0, 0, 0)
+            else:
+                # dark enough or any non-white → black mark
+                if r < 250 or g < 250 or b < 250:
+                    px[x, y] = (0, 0, 0, a)
+                else:
+                    px[x, y] = (0, 0, 0, 0)
+    return im
+
+
+def _paste_icon(base: Image.Image, icon: Image.Image, xy: tuple[int, int]) -> None:
+    base.paste(icon, xy, icon)
 
 
 def _font(size: int, bold: bool = True) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
@@ -145,7 +199,6 @@ def render_token(width: int, height: int, data: dict[str, Any]) -> Image.Image:
     num_x = total_x + round(10 * s) + round(78 * s)
     draw.text((num_x, ty), total_text, fill=BLACK, font=f_big, anchor="lm")
 
-    # red badge
     _rounded_rect(draw, badge_x, badge_y, badge_w, badge_h, max(4, round(6 * s)), RED)
     f_badge = _font(max(16, round(22 * s)))
     draw.text(
@@ -172,14 +225,25 @@ def render_token(width: int, height: int, data: dict[str, Any]) -> Image.Image:
     ]
     f_name = _font(max(13, round(16 * s)))
     f_val = _font(max(16, round(20 * s)))
+    icon_size = max(22, round(30 * s))
+
     for (name, val, pct), (cx, cy) in zip(providers, positions):
         x0, y0 = int(cx), int(cy)
         x1, y1 = int(cx + cell_w), int(cy + cell_h)
         draw.rectangle([x0, y0, x1, y1], outline=BLACK, width=border)
         pad = max(6, round(8 * s))
-        draw.text((x0 + pad, y0 + pad), name, fill=BLACK, font=f_name)
+
+        # official brand icon (same assets as web)
+        stem = ICON_STEM.get(name, "")
+        icon = load_icon(stem, icon_size) if stem else None
+        text_x = x0 + pad
+        if icon is not None:
+            _paste_icon(img, icon, (x0 + pad, y0 + pad + round(2 * s)))
+            text_x = x0 + pad + icon_size + round(8 * s)
+
+        draw.text((text_x, y0 + pad), name, fill=BLACK, font=f_name)
         draw.text(
-            (x0 + pad, y0 + pad + round(18 * s)),
+            (text_x, y0 + pad + round(18 * s)),
             format_compact(val),
             fill=BLACK,
             font=f_val,
@@ -229,7 +293,6 @@ def render_token(width: int, height: int, data: dict[str, Any]) -> Image.Image:
 
 
 def _rounded_rect(draw: ImageDraw.ImageDraw, x, y, w, h, r, fill):
-    # Pillow rounded_rectangle available 8.2+
     try:
         draw.rounded_rectangle([x, y, x + w, y + h], radius=r, fill=fill)
     except Exception:
