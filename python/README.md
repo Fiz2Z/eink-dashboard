@@ -17,11 +17,17 @@ pip install -r requirements.txt
 
 ### 1. 扫描设备
 
+先**唤醒墨水屏**（按键），并**关掉手机 Bluefy** 里的连接。
+
 ```bash
-python -m eink_push scan
+# 默认找名称含 NRF_EPD 的设备，扫 20s+
+python -m eink_push scan --name-prefix NRF_EPD_459F --timeout 40
+
+# 仍没有就加长并看全部（噪音多）
+python -m eink_push scan --all --timeout 40
 ```
 
-记下 `NRF_EPD_xxxx` 的地址（Windows 上可能是 UUID 形态）。
+看到 `★` 和 `use: --address ...` 后，把地址写进 `config.yaml` 的 `ble.address`。
 
 ### 2. 只出预览图（不连蓝牙）
 

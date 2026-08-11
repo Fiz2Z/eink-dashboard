@@ -2,12 +2,11 @@
 # cp config.example.yaml config.yaml
 
 ble:
-  # 设备名包含此字符串即可（也可用 address 精确匹配）
-  name_prefix: "NRF_EPD"
-  # Windows 上可用: python -m eink_push scan 查看
-  # address: "XX:XX:XX:XX:XX:XX"
+  # 设备名包含此字符串即可（写全名如 NRF_EPD_459F 更准）
+  name_prefix: "NRF_EPD_459F"
+  # 扫描到后填地址更稳（Windows: python -m eink_push scan）
   address: ""
-  scan_timeout: 12
+  scan_timeout: 30
   connect_retries: 5
 
 display:

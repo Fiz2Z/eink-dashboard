@@ -124,8 +124,11 @@ async def cmd_scan(args: argparse.Namespace, cfg: dict[str, Any]) -> None:
     ble = cfg.get("ble") or {}
     client = EpdBleClient()
     await client.scan(
-        timeout=float(args.timeout or ble.get("scan_timeout") or 12),
-        name_prefix=str(args.name_prefix or ble.get("name_prefix") or "NRF_EPD"),
+        timeout=float(args.timeout or ble.get("scan_timeout") or 20),
+        name_prefix=str(
+            args.name_prefix or ble.get("name_prefix") or ble.get("device_name") or "NRF_EPD"
+        ),
+        show_all=bool(args.all),
     )
 
 
@@ -155,8 +158,13 @@ async def cmd_push(args: argparse.Namespace, cfg: dict[str, Any]) -> None:
     try:
         await client.connect(
             address=(args.address or ble.get("address") or None) or None,
-            name_prefix=str(args.name_prefix or ble.get("name_prefix") or "NRF_EPD"),
-            timeout=float(args.timeout or ble.get("scan_timeout") or 12),
+            name_prefix=str(
+                args.name_prefix
+                or ble.get("name_prefix")
+                or ble.get("device_name")
+                or "NRF_EPD"
+            ),
+            timeout=float(args.timeout or ble.get("scan_timeout") or 20),
             retries=int(ble.get("connect_retries") or 5),
         )
 
@@ -187,7 +195,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("scan", help="Scan BLE devices")
     s.add_argument("--timeout", type=float, default=None)
-    s.add_argument("--name-prefix", default=None)
+    s.add_argument("--name-prefix", default=None, help="e.g. NRF_EPD_459F")
+    s.add_argument(
+        "--all",
+        action="store_true",
+        help="also print non-matching devices",
+    )
 
     s = sub.add_parser("preview", help="Render image only (no BLE)")
     s.add_argument("--source", choices=["demo", "api", "image"], default=None)

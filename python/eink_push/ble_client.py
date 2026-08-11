@@ -35,31 +35,91 @@ class EpdBleClient:
 
     async def scan(
         self,
-        timeout: float = 10.0,
+        timeout: float = 20.0,
         name_prefix: str = "NRF_EPD",
+        *,
+        show_all: bool = False,
     ) -> list[BLEDevice]:
-        log.info("Scanning %.0fs for BLE devices…", timeout)
-        devices = await BleakScanner.discover(timeout=timeout, return_adv=True)
-        found: list[BLEDevice] = []
-        for dev, adv in devices.values():
-            name = dev.name or adv.local_name or ""
-            line = f"  {dev.address}  RSSI={adv.rssi}  name={name!r}"
-            if name_prefix and name_prefix.upper() in name.upper():
-                log.info("★ %s", line)
-                found.append(dev)
-            else:
-                log.info("  %s", line)
-        return found
+        """
+        Continuous scan. EPD tags often advertise intermittently after wake;
+        longer timeout + callback improves hit rate on Windows.
+        """
+        log.info(
+            "Scanning %.0fs for name containing %r (show_all=%s)…",
+            timeout,
+            name_prefix,
+            show_all,
+        )
+        log.info("Tip: wake the panel (button) and close phone Bluefy first.")
+
+        found_map: dict[str, tuple[BLEDevice, int, str]] = {}
+        svc = EPD_SERVICE.lower().replace("-", "")
+
+        def _on_detect(device: BLEDevice, adv) -> None:
+            name = (device.name or adv.local_name or "").strip()
+            rssi = adv.rssi if adv.rssi is not None else -999
+            # service uuids if present
+            uuids = []
+            try:
+                uuids = [u.lower().replace("-", "") for u in (adv.service_uuids or [])]
+            except Exception:
+                pass
+            hit_name = bool(name_prefix) and name_prefix.upper() in name.upper()
+            hit_svc = svc in uuids
+            if hit_name or hit_svc or show_all:
+                prev = found_map.get(device.address)
+                if not prev or rssi > prev[1]:
+                    found_map[device.address] = (device, rssi, name)
+                    mark = "★" if (hit_name or hit_svc) else " "
+                    why = []
+                    if hit_name:
+                        why.append("name")
+                    if hit_svc:
+                        why.append("EPD-UUID")
+                    tag = ",".join(why) if why else "other"
+                    log.info(
+                        "%s %s  RSSI=%s  name=%r  [%s]",
+                        mark,
+                        device.address,
+                        rssi,
+                        name,
+                        tag,
+                    )
+
+        async with BleakScanner(detection_callback=_on_detect):
+            await asyncio.sleep(timeout)
+
+        # Prefer named EPD devices
+        epd = [
+            t
+            for t in found_map.values()
+            if name_prefix.upper() in (t[2] or "").upper()
+        ]
+        epd.sort(key=lambda x: x[1], reverse=True)
+        if epd:
+            log.info("--- EPD matches: %s ---", len(epd))
+            for dev, rssi, name in epd:
+                log.info("  use: --address %s  (%s RSSI=%s)", dev.address, name, rssi)
+        else:
+            log.warning(
+                "No device name containing %r. Wake the panel and retry with --timeout 40.",
+                name_prefix,
+            )
+            if not show_all:
+                log.warning("Or: python -m eink_push scan --all --timeout 40")
+        return [t[0] for t in epd] if epd else [t[0] for t in found_map.values()]
 
     async def connect(
         self,
         *,
         address: str | None = None,
         name_prefix: str = "NRF_EPD",
-        timeout: float = 12.0,
+        timeout: float = 20.0,
         retries: int = 5,
     ) -> None:
-        device = await self._resolve_device(address=address, name_prefix=name_prefix, timeout=timeout)
+        device = await self._resolve_device(
+            address=address, name_prefix=name_prefix, timeout=timeout
+        )
         last_err: Exception | None = None
         for attempt in range(1, retries + 1):
             try:
@@ -99,20 +159,36 @@ class EpdBleClient:
                 raise RuntimeError(f"未找到地址 {address}，设备是否在附近且已唤醒？")
             return dev
 
-        log.info("Looking for name containing %r …", name_prefix)
-        devices = await BleakScanner.discover(timeout=timeout, return_adv=True)
-        matches: list[tuple[BLEDevice, int]] = []
-        for dev, adv in devices.values():
-            name = (dev.name or adv.local_name or "")
-            if name_prefix.upper() in name.upper():
-                matches.append((dev, adv.rssi or -999))
+        log.info("Looking for name containing %r (%.0fs)…", name_prefix, timeout)
+        matches: list[tuple[BLEDevice, int, str]] = []
+        seen: dict[str, tuple[BLEDevice, int, str]] = {}
+
+        def _on_detect(device: BLEDevice, adv) -> None:
+            name = (device.name or adv.local_name or "").strip()
+            if name_prefix.upper() not in name.upper():
+                return
+            rssi = adv.rssi if adv.rssi is not None else -999
+            prev = seen.get(device.address)
+            if not prev or rssi > prev[1]:
+                seen[device.address] = (device, rssi, name)
+                log.info("  seen %s %r RSSI=%s", device.address, name, rssi)
+
+        async with BleakScanner(detection_callback=_on_detect):
+            await asyncio.sleep(timeout)
+
+        matches = list(seen.values())
         if not matches:
             raise RuntimeError(
-                f"未扫描到名称含 {name_prefix!r} 的设备。可先: python -m eink_push scan"
+                f"未扫描到名称含 {name_prefix!r} 的设备。\n"
+                f"请：1) 按一下板子按键唤醒  2) 关掉手机 Bluefy 连接  "
+                f"3) python -m eink_push scan --name-prefix {name_prefix} --timeout 40"
             )
         matches.sort(key=lambda x: x[1], reverse=True)
-        dev, rssi = matches[0]
-        log.info("Selected %s (%s) RSSI=%s", dev.name, dev.address, rssi)
+        # Prefer exact name match if prefix is full name like NRF_EPD_459F
+        exact = [m for m in matches if (m[2] or "").upper() == name_prefix.upper()]
+        pick = exact[0] if exact else matches[0]
+        dev, rssi, name = pick
+        log.info("Selected %s (%s) RSSI=%s", name, dev.address, rssi)
         return dev
 
     def _on_notify(self, _handle: int, data: bytearray) -> None:
