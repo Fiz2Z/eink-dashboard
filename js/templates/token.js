@@ -1,6 +1,7 @@
 /**
- * AI Token usage dashboard — multi-provider card layout.
- * Brand icons: assets/icons/*.svg (Simple Icons / Lobe Icons style marks).
+ * AI Token dashboard — TOTAL USED reference layout:
+ * header | big centered total + red underline | 2×2 icon+value+pct+bar
+ * No vendor names, no LIMIT/RESET footer.
  */
 
 const RED = "#E60000";
@@ -29,7 +30,6 @@ function loadIcon(src) {
       resolve(img);
     };
     img.onerror = () => reject(new Error(`图标加载失败: ${src}`));
-    // cache-bust only on first load path; keep stable for e-ink offline docker
     img.src = src;
   });
 }
@@ -42,7 +42,7 @@ export const tokenTemplate = {
   id: "token",
   name: "AI Token 用量",
   description:
-    "多厂商 Token 看板（官方风格图标）：总额 + Codex/Claude/Grok/DeepSeek + 额度。红条需「三色」模式。",
+    "TOTAL USED 大数字 + 四宫格（仅图标/用量/占比/进度条）。红条需三色模式。",
   defaults: {
     dateLabel: "",
     total: "2480000",
@@ -54,10 +54,10 @@ export const tokenTemplate = {
     deepseek: "256000",
   },
   fields: [
-    { key: "dateLabel", label: "日期（空=今天，如 AUG 11）", type: "text" },
-    { key: "total", label: "TOTAL Token", type: "text" },
-    { key: "limit", label: "LIMIT 上限", type: "text" },
-    { key: "resetDays", label: "RESET 天数", type: "number" },
+    { key: "dateLabel", label: "日期（空=今天）", type: "text" },
+    { key: "total", label: "TOTAL USED", type: "text" },
+    { key: "limit", label: "LIMIT（算百分比用，可不显示）", type: "text" },
+    { key: "resetDays", label: "RESET 天数（保留字段）", type: "number" },
     { key: "codex", label: "Codex", type: "text" },
     { key: "claude", label: "Claude", type: "text" },
     { key: "grok", label: "Grok", type: "text" },
@@ -77,79 +77,69 @@ export const tokenTemplate = {
     ctx.fillRect(0, 0, W, H);
 
     const total = num(config.total);
-    const limit = Math.max(1, num(config.limit));
-    const totalPct = Math.min(100, Math.round((total / limit) * 100));
-
     const providers = [
-      { id: "codex", name: "CODEX", value: num(config.codex), icon: ICON_PATHS.codex },
-      { id: "claude", name: "CLAUDE", value: num(config.claude), icon: ICON_PATHS.claude },
-      { id: "grok", name: "GROK", value: num(config.grok), icon: ICON_PATHS.grok },
-      { id: "deepseek", name: "DEEPSEEK", value: num(config.deepseek), icon: ICON_PATHS.deepseek },
+      { id: "codex", value: num(config.codex), icon: ICON_PATHS.codex },
+      { id: "claude", value: num(config.claude), icon: ICON_PATHS.claude },
+      { id: "grok", value: num(config.grok), icon: ICON_PATHS.grok },
+      { id: "deepseek", value: num(config.deepseek), icon: ICON_PATHS.deepseek },
     ];
     const sum = providers.reduce((a, p) => a + p.value, 0) || 1;
     providers.forEach((p) => {
       p.pct = Math.round((p.value / sum) * 100);
     });
 
-    const m = Math.max(4, Math.round(6 * s));
-    const headerH = Math.max(28, Math.round(36 * s));
-    const gap = Math.max(4, Math.round(6 * s));
-    const border = Math.max(2, Math.round(3 * s));
+    const m = Math.max(6, Math.round(8 * s));
+    const headerH = Math.max(30, Math.round(38 * s));
+    const gap = Math.max(5, Math.round(7 * s));
+    const radius = Math.max(6, Math.round(8 * s));
+    const border = Math.max(2, Math.round(2.5 * s));
 
     // Header
     ctx.fillStyle = "#000";
     ctx.fillRect(0, 0, W, headerH);
     ctx.fillStyle = "#fff";
-    setFont(ctx, Math.max(14, Math.round(18 * s)), "800");
+    setFont(ctx, Math.max(15, Math.round(18 * s)), "800");
     ctx.textBaseline = "middle";
-    ctx.fillText("AI TOKEN", m + 2, headerH / 2);
+    ctx.fillText("AI TOKEN", m, headerH / 2);
     const dateStr = (config.dateLabel && String(config.dateLabel).trim()) || defaultDateLabel();
     const dw = ctx.measureText(dateStr).width;
-    ctx.fillText(dateStr, W - m - 2 - dw, headerH / 2);
+    ctx.fillText(dateStr, W - m - dw, headerH / 2);
 
-    const bodyTop = headerH;
-    const bodyBot = H;
-    const bodyH = bodyBot - bodyTop;
-    strokeRect(ctx, m, bodyTop + m, W - m * 2, bodyH - m * 2, border);
+    // TOTAL USED card
+    const totalX0 = m;
+    const totalY0 = headerH + gap;
+    const totalX1 = W - m;
+    const totalH = Math.max(72, Math.round(88 * s));
+    const totalY1 = totalY0 + totalH;
+    strokeRoundRect(ctx, totalX0, totalY0, totalX1 - totalX0, totalH, radius, border);
 
-    // TOTAL card
-    const totalY = bodyTop + m + gap;
-    const totalH = Math.max(48, Math.round(62 * s));
-    const totalX = m + gap;
-    const totalW = W - m * 2 - gap * 2;
-    strokeRect(ctx, totalX, totalY, totalW, totalH, border);
-
-    setFont(ctx, Math.max(14, Math.round(18 * s)), "800");
+    setFont(ctx, Math.max(13, Math.round(15 * s)), "700");
     ctx.fillStyle = "#000";
-    ctx.textBaseline = "middle";
-    const ty = totalY + totalH / 2;
-    ctx.fillText("TOTAL", totalX + Math.round(10 * s), ty);
+    ctx.textBaseline = "top";
+    ctx.fillText("TOTAL USED", totalX0 + Math.round(12 * s), totalY0 + Math.round(10 * s));
 
     const totalText = formatCompact(total);
-    setFont(ctx, Math.max(28, Math.round(40 * s)), "900");
-    const badgeW = Math.max(52, Math.round(64 * s));
-    const badgeH = Math.max(28, Math.round(36 * s));
-    const badgeX = totalX + totalW - Math.round(8 * s) - badgeW;
-    const badgeY = totalY + (totalH - badgeH) / 2;
-    let numX = totalX + Math.round(10 * s) + Math.round(78 * s);
-    if (numX + ctx.measureText(totalText).width > badgeX - 8) {
-      setFont(ctx, Math.max(22, Math.round(32 * s)), "900");
-    }
-    ctx.fillStyle = "#000";
-    ctx.fillText(totalText, numX, ty);
+    setFont(ctx, Math.max(40, Math.round(52 * s)), "900");
+    ctx.textBaseline = "middle";
+    ctx.textAlign = "center";
+    const tcx = (totalX0 + totalX1) / 2;
+    const tcy = totalY0 + totalH / 2 + Math.round(6 * s);
+    ctx.fillText(totalText, tcx, tcy);
 
-    roundFill(ctx, badgeX, badgeY, badgeW, badgeH, Math.round(6 * s), RED);
-    ctx.fillStyle = "#fff";
-    setFont(ctx, Math.max(16, Math.round(22 * s)), "800");
-    const pctStr = `${totalPct}%`;
-    const pw = ctx.measureText(pctStr).width;
-    ctx.fillText(pctStr, badgeX + (badgeW - pw) / 2, badgeY + badgeH / 2);
+    // red underline under number
+    const tw = ctx.measureText(totalText).width;
+    const ulW = Math.max(28, Math.floor(tw * 0.28));
+    const ulH = Math.max(3, Math.round(4 * s));
+    const ulY = tcy + Math.max(18, Math.round(26 * s));
+    ctx.fillStyle = RED;
+    ctx.fillRect(tcx - ulW / 2, ulY, ulW, ulH);
+    ctx.textAlign = "start";
 
     // 2×2 cards
-    const gridTop = totalY + totalH + gap;
-    const gridBot = bodyBot - m - gap;
-    const gridLeft = totalX;
-    const gridW = totalW;
+    const gridTop = totalY1 + gap;
+    const gridBot = H - m;
+    const gridLeft = m;
+    const gridW = W - m * 2;
     const gridH = gridBot - gridTop;
     const cellW = (gridW - gap) / 2;
     const cellH = (gridH - gap) / 2;
@@ -162,75 +152,66 @@ export const tokenTemplate = {
     ];
 
     for (const { p, x, y } of cells) {
-      drawProviderCard(ctx, x, y, cellW, cellH, p, s, border);
+      drawProviderCard(ctx, x, y, cellW, cellH, p, s, border, radius);
     }
   },
 };
 
-function drawProviderCard(ctx, x, y, w, h, p, s, border) {
-  strokeRect(ctx, x, y, w, h, border);
+function drawProviderCard(ctx, x, y, w, h, p, s, border, radius) {
+  strokeRoundRect(ctx, x, y, w, h, radius, border);
 
-  const pad = Math.max(6, Math.round(8 * s));
-  // larger icon; no vendor name (CODEX / GROK / …)
-  const iconSize = Math.max(28, Math.round(36 * s));
-  const iconX = x + pad;
-  const iconY = y + pad + Math.round(2 * s);
+  const pad = Math.max(8, Math.round(10 * s));
+  const iconSize = Math.max(30, Math.round(38 * s));
+  const barH = Math.max(8, Math.round(10 * s));
+  const barY = y + h - pad - barH;
+  const contentMidY = (y + barY) / 2;
 
   const img = iconCache.get(p.icon);
-  let textX = x + pad;
+  let textLeft = x + pad;
   if (img && img.complete && img.naturalWidth > 0) {
+    const iconY = contentMidY - iconSize / 2;
     ctx.save();
     ctx.imageSmoothingEnabled = true;
-    ctx.drawImage(img, iconX, iconY, iconSize, iconSize);
+    ctx.drawImage(img, x + pad, iconY, iconSize, iconSize);
     ctx.restore();
-    textX = iconX + iconSize + Math.round(8 * s);
-  } else {
-    ctx.strokeStyle = "#000";
-    ctx.lineWidth = 2;
-    ctx.strokeRect(iconX, iconY, iconSize, iconSize);
-    textX = iconX + iconSize + Math.round(8 * s);
+    textLeft = x + pad + iconSize + Math.round(10 * s);
   }
 
   ctx.fillStyle = "#000";
-  ctx.textBaseline = "top";
-  setFont(ctx, Math.max(18, Math.round(22 * s)), "800");
-  ctx.fillText(formatCompact(p.value), textX, y + pad + Math.round(4 * s));
+  ctx.textBaseline = "middle";
 
-  setFont(ctx, Math.max(13, Math.round(16 * s)), "700");
+  setFont(ctx, Math.max(13, Math.round(15 * s)), "700");
   const pct = `${p.pct}%`;
   const pctW = ctx.measureText(pct).width;
-  ctx.fillText(pct, x + w - pad - pctW, y + pad + Math.round(8 * s));
+  ctx.fillText(pct, x + w - pad - pctW, contentMidY);
 
-  const barX = x + pad;
+  setFont(ctx, Math.max(20, Math.round(26 * s)), "800");
+  ctx.fillText(formatCompact(p.value), textLeft, contentMidY);
+
+  // progress bar
+  const barX0 = x + pad;
   const barW = w - pad * 2;
-  const barH = Math.max(8, Math.round(10 * s));
-  const barY = y + h - pad - barH - 2;
-  strokeRect(ctx, barX, barY, barW, barH, Math.max(1, Math.round(2 * s)));
+  strokeRoundRect(ctx, barX0, barY, barW, barH, Math.max(2, barH / 2), Math.max(1, border - 1));
   const fillW = Math.max(0, Math.floor((barW * Math.min(100, p.pct)) / 100));
-  if (fillW > 0) {
+  if (fillW > 2) {
     ctx.fillStyle = RED;
-    const inset = Math.max(1, Math.round(1 * s));
-    ctx.fillRect(barX + inset, barY + inset, Math.max(0, fillW - inset * 2), barH - inset * 2);
+    const inset = 1;
+    ctx.fillRect(barX0 + inset, barY + inset, Math.max(1, fillW - inset * 2), barH - inset * 2);
   }
 }
 
-function strokeRect(ctx, x, y, w, h, line) {
+function strokeRoundRect(ctx, x, y, w, h, r, line) {
   ctx.strokeStyle = "#000";
   ctx.lineWidth = line;
-  ctx.strokeRect(x + line / 2, y + line / 2, w - line, h - line);
-}
-
-function roundFill(ctx, x, y, w, h, r, color) {
-  ctx.fillStyle = color;
-  ctx.beginPath();
   const rr = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
   ctx.moveTo(x + rr, y);
   ctx.arcTo(x + w, y, x + w, y + h, rr);
   ctx.arcTo(x + w, y + h, x, y + h, rr);
   ctx.arcTo(x, y + h, x, y, rr);
   ctx.arcTo(x, y, x + w, y, rr);
   ctx.closePath();
-  ctx.fill();
+  ctx.stroke();
 }
 
 function setFont(ctx, sizePx, weight = "600") {
