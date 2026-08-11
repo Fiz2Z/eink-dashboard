@@ -150,9 +150,32 @@ async def cmd_push(args: argparse.Namespace, cfg: dict[str, Any]) -> None:
         img.save(preview)
         log.info("Preview → %s", preview)
 
-    bw, red = pack_planes(img)
-    three = (args.color_mode or disp.get("color_mode") or "threeColor") != "bw"
-    log.info("Packed bw=%s red=%s three_color=%s", len(bw), len(red), three)
+    # Align with web host on BWR panels:
+    # - threeColor: black plane + real red plane (from image)
+    # - bw: black plane only for *content*, but still send all-white red plane
+    #   to CLEAR residual red speckles (same as web "三色" with no red ink)
+    color_mode = (args.color_mode or disp.get("color_mode") or "threeColor").lower()
+    use_red_content = color_mode in ("threecolor", "three_color", "bwr")
+
+    if use_red_content:
+        bw, red = pack_planes(img)
+        log.info("Packed BWR content: bw=%s red=%s (real red channel)", len(bw), len(red))
+    else:
+        # Force monochrome content, then clear red plane with 0xFF
+        from PIL import Image as _Image
+
+        gray = img.convert("L")
+        mono = gray.point(lambda p: 0 if p < 160 else 255, mode="L").convert("RGB")
+        bw, _ignored = pack_planes(mono)
+        red = bytes([0xFF] * len(bw))
+        log.info(
+            "Packed BW content + white red plane: bw=%s red=%s (clears red dots)",
+            len(bw),
+            len(red),
+        )
+
+    # Always two-plane push for nRF BWR shelf labels (matches web threeColor path)
+    always_bwr = True
 
     client = EpdBleClient()
     try:
@@ -173,15 +196,21 @@ async def cmd_push(args: argparse.Namespace, cfg: dict[str, Any]) -> None:
 
         await client.push_planes(
             bw,
-            red if three else None,
-            three_color=three,
+            red,
+            three_color=always_bwr,
             interleaved=int(args.interleaved if args.interleaved is not None else 0),
+            chunk_delay=float(args.chunk_delay if args.chunk_delay is not None else 0.012),
+            settle_after_refresh=float(
+                args.settle if args.settle is not None else 18.0
+            ),
             on_progress=progress,
         )
-        log.info("Done. Wait for full refresh; BLE may drop (normal).")
-        await asyncio.sleep(2)
+        log.info("推送流程结束。若仍有红点，请再 push 一次 threeColor（完整双通道）。")
     finally:
-        await client.disconnect()
+        try:
+            await client.disconnect()
+        except Exception:
+            pass
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -220,6 +249,18 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--timeout", type=float, default=None)
     s.add_argument("--color-mode", choices=["threeColor", "bw"], default=None)
     s.add_argument("--interleaved", type=int, default=None)
+    s.add_argument(
+        "--chunk-delay",
+        type=float,
+        default=None,
+        help="seconds between BLE chunks (default 0.012)",
+    )
+    s.add_argument(
+        "--settle",
+        type=float,
+        default=None,
+        help="seconds to wait after REFRESH for e-ink full refresh (default 18)",
+    )
 
     return p
 

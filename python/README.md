@@ -121,8 +121,21 @@ schtasks /Create /TN "EinkTokenPush" `
 
 - 需 **Windows 蓝牙**（或本机适配器）；Docker 容器默认无主机蓝牙  
 - 首次建议 `--source demo` 验证链路  
-- 三色屏用 `color_mode: threeColor`（默认）  
-- 日志里出现刷屏后断开是正常现象  
+- **与 Web 一致默认 `threeColor`**：黑白面 + 红面；有红进度条/徽章时用这个  
+- `bw`：内容压成纯黑白，但**仍会传全白红通道**（清红点），不是「只传一层」  
+- 以前若用旧版 `bw` 只传黑白层，红通道残留 → 满屏红点；再推一次即可清掉  
+- **全刷约 10–20 秒**：REFRESH 后默认等待约 18 秒  
+- 传图中途断开会导致半刷——靠近后重跑 `push`  
+
+### 红点 / 半刷时
+
+```bash
+# 与 Web 相同：双通道 + 演示图（推荐）
+python -m eink_push -c config.yaml push --source demo --color-mode threeColor --settle 25
+
+# 更慢更稳
+python -m eink_push -c config.yaml push --source demo --color-mode threeColor --chunk-delay 0.02 --settle 25
+```
 
 ## 协议参考
 
