@@ -148,7 +148,6 @@ def render_token(width: int, height: int, data: dict[str, Any]) -> Image.Image:
 
     m = max(4, round(6 * s))
     header_h = max(28, round(36 * s))
-    footer_h = max(26, round(32 * s))
     gap = max(4, round(6 * s))
     border = max(2, round(3 * s))
 
@@ -168,9 +167,9 @@ def render_token(width: int, height: int, data: dict[str, Any]) -> Image.Image:
         anchor="rm",
     )
 
-    # Outer frame
+    # Outer frame (no footer strip)
     body_top = header_h
-    body_bot = height - footer_h
+    body_bot = height
     draw.rectangle(
         [m, body_top + m, width - m, body_bot - m],
         outline=BLACK,
@@ -223,9 +222,10 @@ def render_token(width: int, height: int, data: dict[str, Any]) -> Image.Image:
         (grid_left, grid_top + cell_h + gap),
         (grid_left + cell_w + gap, grid_top + cell_h + gap),
     ]
-    f_name = _font(max(13, round(16 * s)))
-    f_val = _font(max(16, round(20 * s)))
-    icon_size = max(22, round(30 * s))
+    f_pct = _font(max(13, round(16 * s)))
+    f_val = _font(max(18, round(22 * s)))
+    # larger icon when vendor name is omitted
+    icon_size = max(28, round(36 * s))
 
     for (name, val, pct), (cx, cy) in zip(providers, positions):
         x0, y0 = int(cx), int(cy)
@@ -233,7 +233,7 @@ def render_token(width: int, height: int, data: dict[str, Any]) -> Image.Image:
         draw.rectangle([x0, y0, x1, y1], outline=BLACK, width=border)
         pad = max(6, round(8 * s))
 
-        # official brand icon (same assets as web)
+        # icon only (no CODEX/GROK/… labels) — same assets as web
         stem = ICON_STEM.get(name, "")
         icon = load_icon(stem, icon_size) if stem else None
         text_x = x0 + pad
@@ -241,16 +241,21 @@ def render_token(width: int, height: int, data: dict[str, Any]) -> Image.Image:
             _paste_icon(img, icon, (x0 + pad, y0 + pad + round(2 * s)))
             text_x = x0 + pad + icon_size + round(8 * s)
 
-        draw.text((text_x, y0 + pad), name, fill=BLACK, font=f_name)
+        # usage number + percent only
         draw.text(
-            (text_x, y0 + pad + round(18 * s)),
+            (text_x, y0 + pad + round(4 * s)),
             format_compact(val),
             fill=BLACK,
             font=f_val,
         )
         pct_s = f"{pct}%"
-        tw = draw.textlength(pct_s, font=f_name)
-        draw.text((x1 - pad - tw, y0 + pad + round(10 * s)), pct_s, fill=BLACK, font=f_name)
+        tw = draw.textlength(pct_s, font=f_pct)
+        draw.text(
+            (x1 - pad - tw, y0 + pad + round(8 * s)),
+            pct_s,
+            fill=BLACK,
+            font=f_pct,
+        )
         bar_x = x0 + pad
         bar_w = (x1 - x0) - pad * 2
         bar_h = max(8, round(10 * s))
@@ -269,26 +274,6 @@ def render_token(width: int, height: int, data: dict[str, Any]) -> Image.Image:
                 fill=RED,
             )
 
-    # Footer
-    fy = height - footer_h
-    draw.rectangle([m, fy, width - m, height - m], outline=BLACK, width=border)
-    f_f = _font(max(12, round(15 * s)))
-    fmid = fy + (footer_h - m) // 2
-    draw.text(
-        (m + round(10 * s), fmid),
-        f"LIMIT  {format_compact(limit)}",
-        fill=BLACK,
-        font=f_f,
-        anchor="lm",
-    )
-    reset = f"RESET  {int(_num(data.get('reset_days', 0)))} DAYS"
-    draw.text(
-        (width - m - round(10 * s), fmid),
-        reset,
-        fill=BLACK,
-        font=f_f,
-        anchor="rm",
-    )
     return img
 
 

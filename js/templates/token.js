@@ -93,7 +93,6 @@ export const tokenTemplate = {
 
     const m = Math.max(4, Math.round(6 * s));
     const headerH = Math.max(28, Math.round(36 * s));
-    const footerH = Math.max(26, Math.round(32 * s));
     const gap = Math.max(4, Math.round(6 * s));
     const border = Math.max(2, Math.round(3 * s));
 
@@ -109,7 +108,7 @@ export const tokenTemplate = {
     ctx.fillText(dateStr, W - m - 2 - dw, headerH / 2);
 
     const bodyTop = headerH;
-    const bodyBot = H - footerH;
+    const bodyBot = H;
     const bodyH = bodyBot - bodyTop;
     strokeRect(ctx, m, bodyTop + m, W - m * 2, bodyH - m * 2, border);
 
@@ -165,18 +164,6 @@ export const tokenTemplate = {
     for (const { p, x, y } of cells) {
       drawProviderCard(ctx, x, y, cellW, cellH, p, s, border);
     }
-
-    // Footer
-    const fy = H - footerH;
-    strokeRect(ctx, m, fy, W - m * 2, footerH - m, border);
-    setFont(ctx, Math.max(12, Math.round(15 * s)), "800");
-    ctx.fillStyle = "#000";
-    ctx.textBaseline = "middle";
-    const fmid = fy + (footerH - m) / 2;
-    ctx.fillText(`LIMIT  ${formatCompact(limit)}`, m + Math.round(10 * s), fmid);
-    const reset = `RESET  ${Math.max(0, Math.floor(num(config.resetDays)))} DAYS`;
-    const rw = ctx.measureText(reset).width;
-    ctx.fillText(reset, W - m - Math.round(10 * s) - rw, fmid);
   },
 };
 
@@ -184,37 +171,35 @@ function drawProviderCard(ctx, x, y, w, h, p, s, border) {
   strokeRect(ctx, x, y, w, h, border);
 
   const pad = Math.max(6, Math.round(8 * s));
-  const iconSize = Math.max(22, Math.round(30 * s));
+  // larger icon; no vendor name (CODEX / GROK / …)
+  const iconSize = Math.max(28, Math.round(36 * s));
   const iconX = x + pad;
   const iconY = y + pad + Math.round(2 * s);
 
   const img = iconCache.get(p.icon);
+  let textX = x + pad;
   if (img && img.complete && img.naturalWidth > 0) {
-    // Draw monochrome brand mark
     ctx.save();
     ctx.imageSmoothingEnabled = true;
     ctx.drawImage(img, iconX, iconY, iconSize, iconSize);
     ctx.restore();
+    textX = iconX + iconSize + Math.round(8 * s);
   } else {
-    // fallback box
     ctx.strokeStyle = "#000";
     ctx.lineWidth = 2;
     ctx.strokeRect(iconX, iconY, iconSize, iconSize);
+    textX = iconX + iconSize + Math.round(8 * s);
   }
 
-  const textX = iconX + iconSize + Math.round(8 * s);
-  setFont(ctx, Math.max(13, Math.round(16 * s)), "800");
   ctx.fillStyle = "#000";
   ctx.textBaseline = "top";
-  ctx.fillText(p.name, textX, y + pad);
-
-  setFont(ctx, Math.max(16, Math.round(20 * s)), "800");
-  ctx.fillText(formatCompact(p.value), textX, y + pad + Math.round(18 * s));
+  setFont(ctx, Math.max(18, Math.round(22 * s)), "800");
+  ctx.fillText(formatCompact(p.value), textX, y + pad + Math.round(4 * s));
 
   setFont(ctx, Math.max(13, Math.round(16 * s)), "700");
   const pct = `${p.pct}%`;
   const pctW = ctx.measureText(pct).width;
-  ctx.fillText(pct, x + w - pad - pctW, y + pad + Math.round(10 * s));
+  ctx.fillText(pct, x + w - pad - pctW, y + pad + Math.round(8 * s));
 
   const barX = x + pad;
   const barW = w - pad * 2;
