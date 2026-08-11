@@ -2,6 +2,7 @@
  * AI Token dashboard — TOTAL USED reference layout:
  * header | big centered total + red underline | 2×2 icon+value+pct+bar
  * No vendor names, no LIMIT/RESET footer.
+ * Percent sits in a fixed right gutter so long values never cover it.
  */
 
 const RED = "#E60000";
@@ -126,7 +127,6 @@ export const tokenTemplate = {
     const tcy = totalY0 + totalH / 2 + Math.round(6 * s);
     ctx.fillText(totalText, tcx, tcy);
 
-    // red underline under number
     const tw = ctx.measureText(totalText).width;
     const ulW = Math.max(28, Math.floor(tw * 0.28));
     const ulH = Math.max(3, Math.round(4 * s));
@@ -161,10 +161,12 @@ function drawProviderCard(ctx, x, y, w, h, p, s, border, radius) {
   strokeRoundRect(ctx, x, y, w, h, radius, border);
 
   const pad = Math.max(8, Math.round(10 * s));
-  const iconSize = Math.max(30, Math.round(38 * s));
+  const iconSize = Math.max(28, Math.round(34 * s));
   const barH = Math.max(8, Math.round(10 * s));
   const barY = y + h - pad - barH;
   const contentMidY = (y + barY) / 2;
+  // fixed right gutter: "100%" never overlaps long values like "10.36M"
+  const pctGutter = Math.max(36, Math.round(44 * s));
 
   const img = iconCache.get(p.icon);
   let textLeft = x + pad;
@@ -174,26 +176,32 @@ function drawProviderCard(ctx, x, y, w, h, p, s, border, radius) {
     ctx.imageSmoothingEnabled = true;
     ctx.drawImage(img, x + pad, iconY, iconSize, iconSize);
     ctx.restore();
-    textLeft = x + pad + iconSize + Math.round(10 * s);
+    textLeft = x + pad + iconSize + Math.round(8 * s);
   }
 
   ctx.fillStyle = "#000";
   ctx.textBaseline = "middle";
 
-  setFont(ctx, Math.max(13, Math.round(15 * s)), "700");
+  setFont(ctx, Math.max(12, Math.round(14 * s)), "700");
   const pct = `${p.pct}%`;
   const pctW = ctx.measureText(pct).width;
   ctx.fillText(pct, x + w - pad - pctW, contentMidY);
 
-  setFont(ctx, Math.max(20, Math.round(26 * s)), "800");
-  ctx.fillText(formatCompact(p.value), textLeft, contentMidY);
+  const val = formatCompact(p.value);
+  const valMaxW = Math.max(20, x + w - pad - pctGutter - textLeft);
+  let sizeVal = Math.max(16, Math.round(24 * s));
+  setFont(ctx, sizeVal, "800");
+  while (ctx.measureText(val).width > valMaxW && sizeVal > 12) {
+    sizeVal -= 1;
+    setFont(ctx, sizeVal, "800");
+  }
+  ctx.fillText(val, textLeft, contentMidY);
 
-  // progress bar
   const barX0 = x + pad;
   const barW = w - pad * 2;
   strokeRoundRect(ctx, barX0, barY, barW, barH, Math.max(2, barH / 2), Math.max(1, border - 1));
   const fillW = Math.max(0, Math.floor((barW * Math.min(100, p.pct)) / 100));
-  if (fillW > 2) {
+  if (fillW > 0) {
     ctx.fillStyle = RED;
     const inset = 1;
     ctx.fillRect(barX0 + inset, barY + inset, Math.max(1, fillW - inset * 2), barH - inset * 2);
