@@ -226,9 +226,11 @@ def render_token(width: int, height: int, data: dict[str, Any]) -> Image.Image:
         (grid_left + cell_w + gap, grid_top + cell_h + gap),
     ]
 
-    f_val = _font(max(20, round(26 * s)))
-    f_pct = _font(max(13, round(15 * s)))
-    icon_size = max(30, round(38 * s))
+    f_val = _font(max(18, round(24 * s)))
+    f_pct = _font(max(12, round(14 * s)))
+    icon_size = max(28, round(34 * s))
+    # reserve fixed right gutter so "100%" never collides with value
+    pct_gutter = max(36, round(44 * s))
 
     for (name, val, pct), (cx0, cy0) in zip(providers, cells):
         x0, y0 = int(cx0), int(cy0)
@@ -236,7 +238,6 @@ def render_token(width: int, height: int, data: dict[str, Any]) -> Image.Image:
         _round_rect(draw, [x0, y0, x1, y1], radius, outline=BLACK, width=border)
 
         pad = max(8, round(10 * s))
-        # vertical center content above progress bar
         bar_h = max(8, round(10 * s))
         bar_y = y1 - pad - bar_h
         content_mid_y = (y0 + bar_y) // 2
@@ -247,31 +248,40 @@ def render_token(width: int, height: int, data: dict[str, Any]) -> Image.Image:
         if icon is not None:
             icon_y = content_mid_y - icon_size // 2
             _paste_icon(img, icon, (icon_x, icon_y))
-            text_left = icon_x + icon_size + round(10 * s)
+            text_left = icon_x + icon_size + round(8 * s)
         else:
             text_left = x0 + pad
 
-        # value left of center-right, pct on far right
-        val_s = format_compact(val)
+        # percentage: fixed right column
         pct_s = f"{pct}%"
-        pct_w = draw.textlength(pct_s, font=f_pct)
+        pct_right = x1 - pad
         draw.text(
-            (x1 - pad, content_mid_y),
+            (pct_right, content_mid_y),
             pct_s,
             fill=BLACK,
             font=f_pct,
             anchor="rm",
         )
-        # value between icon and pct
+
+        # value: between icon and pct gutter; shrink font if still too wide
+        val_s = format_compact(val)
+        val_max_right = x1 - pad - pct_gutter
+        val_max_w = max(20, val_max_right - text_left)
+        font_val = f_val
+        size = max(14, round(24 * s))
+        while draw.textlength(val_s, font=font_val) > val_max_w and size > 12:
+            size -= 1
+            font_val = _font(size)
+        # clip draw area by not extending into gutter (text may still overflow tiny bit)
         draw.text(
             (text_left, content_mid_y),
             val_s,
             fill=BLACK,
-            font=f_val,
+            font=font_val,
             anchor="lm",
         )
 
-        # progress bar full width of card inner
+        # progress bar
         bar_x0 = x0 + pad
         bar_x1 = x1 - pad
         bar_w = bar_x1 - bar_x0
@@ -285,7 +295,6 @@ def render_token(width: int, height: int, data: dict[str, Any]) -> Image.Image:
         fill_w = int(bar_w * min(100, pct) / 100)
         if fill_w > 2:
             inset = 1
-            # filled portion (red), rounded-ish left
             draw.rectangle(
                 [
                     bar_x0 + inset,
