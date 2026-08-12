@@ -25,13 +25,21 @@ from .render_token import render_token
 log = logging.getLogger("eink_push")
 
 
-def setup_logging(verbose: bool) -> None:
+def setup_logging(verbose: bool, log_file: Path | None = None) -> None:
     level = logging.DEBUG if verbose else logging.INFO
-    logging.basicConfig(
-        level=level,
-        format="%(asctime)s %(levelname)s %(message)s",
-        datefmt="%H:%M:%S",
-    )
+    fmt = logging.Formatter("%(asctime)s %(levelname)s %(message)s", datefmt="%H:%M:%S")
+    root = logging.getLogger()
+    root.handlers.clear()
+    root.setLevel(level)
+    sh = logging.StreamHandler(sys.stdout)
+    sh.setFormatter(fmt)
+    root.addHandler(sh)
+    if log_file:
+        log_file = Path(log_file)
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        fh = logging.FileHandler(log_file, encoding="utf-8")
+        fh.setFormatter(fmt)
+        root.addHandler(fh)
 
 
 def load_config(path: Path | None) -> dict[str, Any]:
@@ -116,22 +124,64 @@ async def build_image_async(cfg: dict[str, Any], args: argparse.Namespace):
         return quantize_bw_red(render_token(w, h, data))
 
     if source in ("cc_switch", "cc-switch", "ccswitch"):
-        from .cc_switch import default_db_path, fetch_today_usage
+        from .cc_switch import default_db_path, fetch_dashboard_usage
 
         cs = cfg.get("cc_switch") or {}
         db = cs.get("db_path") or default_db_path()
         include_cache = bool(cs.get("include_cache", False))
-        data = fetch_today_usage(Path(db), include_cache=include_cache)
-        # limit still from config (CC Switch has no quota field)
-        base = merge_token_data(cfg)
-        if data.get("limit") is None:
-            data["limit"] = base.get("limit") or 1
-        log.info("Render from CC Switch today: %s", data)
-        return quantize_bw_red(render_token(w, h, data))
+        data = fetch_dashboard_usage(Path(db) if db else None, include_cache=include_cache)
+        log.info(
+            "Render CC Switch 30d panel: total30d=%s today=%s codex=%s grok=%s",
+            data.get("total_30d"),
+            data.get("today_total"),
+            data.get("codex_30d"),
+            data.get("grok_30d"),
+        )
+        # render_token already quantizes to exact BWR
+        return render_token(w, h, data)
+
+    if source == "demo":
+        # synthetic 30-day demo matching reference proportions
+        import random
+
+        random.seed(42)
+        daily = [random.randint(20_000, 80_000) for _ in range(29)] + [58_600]
+        codex_30d = 986_000
+        grok_30d = 496_000
+        total_30d = codex_30d + grok_30d
+        data = {
+            "total_30d": total_30d,
+            "today_total": 58_600,
+            "codex_30d": codex_30d,
+            "grok_30d": grok_30d,
+            "codex_pct": round(codex_30d / total_30d * 100),
+            "grok_pct": 100 - round(codex_30d / total_30d * 100),
+            "daily": daily,
+            "start_label": "JUL 14",
+            "end_label": "AUG 12",
+        }
+        log.info("Render demo 30d token panel")
+        return render_token(w, h, data)
 
     data = merge_token_data(cfg)
-    log.info("Render demo token dashboard %sx%s", w, h)
-    return quantize_bw_red(render_token(w, h, data))
+    # legacy flat fields → minimal dashboard
+    data = {
+        "total_30d": data.get("total") or 0,
+        "today_total": data.get("total") or 0,
+        "codex_30d": data.get("codex") or 0,
+        "grok_30d": data.get("grok") or 0,
+        "codex_pct": 50,
+        "grok_pct": 50,
+        "daily": [0] * 30,
+        "start_label": "",
+        "end_label": data.get("date_label") or "",
+    }
+    t = (data["codex_30d"] or 0) + (data["grok_30d"] or 0)
+    if t > 0:
+        data["codex_pct"] = round(data["codex_30d"] / t * 100)
+        data["grok_pct"] = 100 - data["codex_pct"]
+    log.info("Render legacy token dashboard %sx%s", w, h)
+    return render_token(w, h, data)
 
 
 async def cmd_scan(args: argparse.Namespace, cfg: dict[str, Any]) -> None:
@@ -156,6 +206,17 @@ async def cmd_preview(args: argparse.Namespace, cfg: dict[str, Any]) -> None:
 async def cmd_push(args: argparse.Namespace, cfg: dict[str, Any]) -> None:
     ble = cfg.get("ble") or {}
     disp = cfg.get("display") or {}
+    retry_cfg = cfg.get("retry") or {}
+
+    # Whole-job retries (connect + full transfer)
+    job_retries = int(
+        args.job_retries
+        if getattr(args, "job_retries", None) is not None
+        else retry_cfg.get("job_retries", 3)
+    )
+    job_delay = float(retry_cfg.get("job_retry_delay_sec", 15))
+    connect_retries = int(ble.get("connect_retries") or 5)
+
     img = await build_image_async(cfg, args)
 
     preview = args.out or cfg.get("save_preview")
@@ -164,10 +225,6 @@ async def cmd_push(args: argparse.Namespace, cfg: dict[str, Any]) -> None:
         img.save(preview)
         log.info("Preview → %s", preview)
 
-    # Align with web host on BWR panels:
-    # - threeColor: black plane + real red plane (from image)
-    # - bw: black plane only for *content*, but still send all-white red plane
-    #   to CLEAR residual red speckles (same as web "三色" with no red ink)
     color_mode = (args.color_mode or disp.get("color_mode") or "threeColor").lower()
     use_red_content = color_mode in ("threecolor", "three_color", "bwr")
 
@@ -175,9 +232,6 @@ async def cmd_push(args: argparse.Namespace, cfg: dict[str, Any]) -> None:
         bw, red = pack_planes(img)
         log.info("Packed BWR content: bw=%s red=%s (real red channel)", len(bw), len(red))
     else:
-        # Force monochrome content, then clear red plane with 0xFF
-        from PIL import Image as _Image
-
         gray = img.convert("L")
         mono = gray.point(lambda p: 0 if p < 160 else 255, mode="L").convert("RGB")
         bw, _ignored = pack_planes(mono)
@@ -188,43 +242,74 @@ async def cmd_push(args: argparse.Namespace, cfg: dict[str, Any]) -> None:
             len(red),
         )
 
-    # Always two-plane push for nRF BWR shelf labels (matches web threeColor path)
-    always_bwr = True
+    address = (args.address or ble.get("address") or None) or None
+    if address == "":
+        address = None
+    name_prefix = str(
+        args.name_prefix or ble.get("name_prefix") or ble.get("device_name") or "NRF_EPD"
+    )
+    scan_timeout = float(args.timeout or ble.get("scan_timeout") or 20)
+    interleaved = int(args.interleaved if args.interleaved is not None else 0)
+    chunk_delay = float(args.chunk_delay if args.chunk_delay is not None else 0.012)
+    settle = float(args.settle if args.settle is not None else 18.0)
 
-    client = EpdBleClient()
-    try:
-        await client.connect(
-            address=(args.address or ble.get("address") or None) or None,
-            name_prefix=str(
-                args.name_prefix
-                or ble.get("name_prefix")
-                or ble.get("device_name")
-                or "NRF_EPD"
-            ),
-            timeout=float(args.timeout or ble.get("scan_timeout") or 20),
-            retries=int(ble.get("connect_retries") or 5),
-        )
-
-        def progress(i: int, total: int, plane: str) -> None:
-            log.info("  %s %s/%s", plane, i, total)
-
-        await client.push_planes(
-            bw,
-            red,
-            three_color=always_bwr,
-            interleaved=int(args.interleaved if args.interleaved is not None else 0),
-            chunk_delay=float(args.chunk_delay if args.chunk_delay is not None else 0.012),
-            settle_after_refresh=float(
-                args.settle if args.settle is not None else 18.0
-            ),
-            on_progress=progress,
-        )
-        log.info("推送流程结束。若仍有红点，请再 push 一次 threeColor（完整双通道）。")
-    finally:
+    last_err: Exception | None = None
+    for job in range(1, job_retries + 1):
+        client = EpdBleClient()
         try:
-            await client.disconnect()
-        except Exception:
-            pass
+            log.info("=== Push job %s/%s ===", job, job_retries)
+            # Attempt 1: configured address; on fail fall back to name scan
+            try:
+                await client.connect(
+                    address=address,
+                    name_prefix=name_prefix,
+                    timeout=scan_timeout,
+                    retries=connect_retries,
+                )
+            except Exception as e:
+                if address:
+                    log.warning(
+                        "Connect by address failed (%s); retry by name %r …",
+                        e,
+                        name_prefix,
+                    )
+                    await client.disconnect()
+                    await client.connect(
+                        address=None,
+                        name_prefix=name_prefix,
+                        timeout=scan_timeout,
+                        retries=connect_retries,
+                    )
+                else:
+                    raise
+
+            def progress(i: int, total: int, plane: str) -> None:
+                log.info("  %s %s/%s", plane, i, total)
+
+            await client.push_planes(
+                bw,
+                red,
+                three_color=True,
+                interleaved=interleaved,
+                chunk_delay=chunk_delay,
+                settle_after_refresh=settle,
+                on_progress=progress,
+            )
+            log.info("推送成功 (job %s/%s)。", job, job_retries)
+            return
+        except Exception as e:
+            last_err = e
+            log.error("推送失败 (job %s/%s): %s", job, job_retries, e)
+            if job < job_retries:
+                log.info("%.0f 秒后整任务重试…", job_delay)
+                await asyncio.sleep(job_delay)
+        finally:
+            try:
+                await client.disconnect()
+            except Exception:
+                pass
+
+    raise SystemExit(f"推送在 {job_retries} 次整任务重试后仍失败: {last_err}")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -234,6 +319,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument("-c", "--config", type=Path, help="config.yaml path")
     p.add_argument("-v", "--verbose", action="store_true")
+    p.add_argument(
+        "--log-file",
+        type=Path,
+        default=None,
+        help="also write logs to this file (for silent/pythonw runs)",
+    )
     sub = p.add_subparsers(dest="cmd", required=True)
 
     s = sub.add_parser("scan", help="Scan BLE devices")
@@ -283,6 +374,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="seconds to wait after REFRESH for e-ink full refresh (default 18)",
     )
+    s.add_argument(
+        "--job-retries",
+        type=int,
+        default=None,
+        help="full connect+push retries on failure (default 3)",
+    )
 
     return p
 
@@ -290,7 +387,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> None:
     parser = build_parser()
     args = parser.parse_args(argv)
-    setup_logging(args.verbose)
+    setup_logging(args.verbose, getattr(args, "log_file", None))
     cfg = load_config(args.config)
 
     if args.cmd == "scan":

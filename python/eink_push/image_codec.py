@@ -7,8 +7,11 @@ from PIL import Image
 # 1 = white/off pigment, 0 = pigment on (matches web host)
 
 
-def _is_red(r: int, g: int, b: int, red_ratio: float = 1.35) -> bool:
-    return r > 120 and r > g * red_ratio and r > b * red_ratio
+RED = (0xD7, 0x19, 0x20)  # #D71920
+
+
+def _is_red(r: int, g: int, b: int, red_ratio: float = 1.25) -> bool:
+    return r > 140 and r > g * red_ratio and r > b * red_ratio
 
 
 def _is_black(r: int, g: int, b: int, dark: int = 140) -> bool:
@@ -17,7 +20,7 @@ def _is_black(r: int, g: int, b: int, dark: int = 140) -> bool:
 
 
 def quantize_bw_red(img: Image.Image) -> Image.Image:
-    """Snap to pure white / black / red for BWR panels."""
+    """Snap to pure #FFFFFF / #000000 / #D71920 for BWR panels."""
     img = img.convert("RGB")
     px = img.load()
     w, h = img.size
@@ -25,7 +28,7 @@ def quantize_bw_red(img: Image.Image) -> Image.Image:
         for x in range(w):
             r, g, b = px[x, y]
             if _is_red(r, g, b):
-                px[x, y] = (230, 0, 0)
+                px[x, y] = RED
             elif _is_black(r, g, b):
                 px[x, y] = (0, 0, 0)
             else:

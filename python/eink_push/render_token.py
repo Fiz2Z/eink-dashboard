@@ -1,38 +1,26 @@
-"""Token dashboard renderer — layout matches the TOTAL USED reference card."""
+"""
+400×300 BWR e-ink AI Token panel.
+
+Layout:
+  - Top card: 30D TOTAL | TODAY + 30-day bar chart
+  - Bottom: Codex | Grok cards (icon + 30d tokens + % + red bar)
+"""
 
 from __future__ import annotations
 
-from datetime import datetime
 from functools import lru_cache
+from math import floor, log10
 from pathlib import Path
 from typing import Any
 
 from PIL import Image, ImageDraw, ImageFont
 
-RED = (230, 0, 0)
-BLACK = (0, 0, 0)
+# Spec colors only
 WHITE = (255, 255, 255)
-MONTHS = [
-    "JAN",
-    "FEB",
-    "MAR",
-    "APR",
-    "MAY",
-    "JUN",
-    "JUL",
-    "AUG",
-    "SEP",
-    "OCT",
-    "NOV",
-    "DEC",
-]
+BLACK = (0, 0, 0)
+RED = (0xD7, 0x19, 0x20)  # #D71920
 
-ICON_STEM = {
-    "CODEX": "openai",
-    "CLAUDE": "anthropic",
-    "GROK": "grok",
-    "DEEPSEEK": "deepseek",
-}
+ICON_STEM = {"codex": "openai", "grok": "grok"}
 
 
 def _icon_dirs() -> list[Path]:
@@ -51,7 +39,7 @@ def load_icon(stem: str, size: int) -> Image.Image | None:
         p = d / f"{stem}.png"
         if p.is_file():
             im = Image.open(p).convert("RGBA")
-            im = im.resize((size, size), Image.Resampling.LANCZOS)
+            im = im.resize((size, size), Image.Resampling.NEAREST)
             return _to_black_alpha(im)
     return None
 
@@ -65,30 +53,56 @@ def _to_black_alpha(im: Image.Image) -> Image.Image:
             if a < 16:
                 px[x, y] = (0, 0, 0, 0)
             elif r < 250 or g < 250 or b < 250:
-                px[x, y] = (0, 0, 0, a)
+                px[x, y] = (0, 0, 0, 255)
             else:
                 px[x, y] = (0, 0, 0, 0)
     return im
 
 
-def _paste_icon(base: Image.Image, icon: Image.Image, xy: tuple[int, int]) -> None:
-    base.paste(icon, xy, icon)
-
-
-def _font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
-    candidates = []
+def _font(size: int, kind: str = "num") -> ImageFont.ImageFont:
+    """
+    kind: label | num | unit
+    Prefer condensed / tabular-friendly fonts; fall back gracefully.
+    """
     windir = Path(r"C:\Windows\Fonts")
-    if windir.is_dir():
-        candidates += [
-            windir / "msyhbd.ttc",
-            windir / "msyh.ttc",
-            windir / "arialbd.ttf",
-            windir / "arial.ttf",
-            windir / "simhei.ttf",
+    if kind == "num":
+        names = [
+            "RobotoCondensed-Bold.ttf",
+            "ROBOTOCONDENSED-BOLD.TTF",
+            "arialbd.ttf",
+            "ARIALN.TTF",  # Arial Narrow
+            "ARIALNB.TTF",
+            "msyhbd.ttc",
+            "msyh.ttc",
+            "arial.ttf",
+            "simhei.ttf",
         ]
+    elif kind == "label":
+        names = [
+            "RobotoCondensed-Bold.ttf",
+            "arialbd.ttf",
+            "ARIALN.TTF",
+            "msyhbd.ttc",
+            "msyh.ttc",
+            "arial.ttf",
+        ]
+    else:  # unit / small
+        names = [
+            "msyhbd.ttc",
+            "msyh.ttc",
+            "arialbd.ttf",
+            "arial.ttf",
+            "simhei.ttf",
+        ]
+
+    candidates: list[Path] = []
+    if windir.is_dir():
+        for n in names:
+            candidates.append(windir / n)
     candidates += [
+        Path("/usr/share/fonts/truetype/roboto/hinted/RobotoCondensed-Bold.ttf"),
         Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
-        Path("/System/Library/Fonts/PingFang.ttc"),
+        Path("/System/Library/Fonts/Supplemental/Arial Narrow Bold.ttf"),
     ]
     for p in candidates:
         if p.is_file():
@@ -99,25 +113,119 @@ def _font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
     return ImageFont.load_default()
 
 
-def _num(v: Any) -> float:
-    try:
-        return float(str(v).replace(",", "").replace("_", "").strip())
-    except (TypeError, ValueError):
-        return 0.0
+def _sig_str(v: float, sig: int = 4) -> str:
+    if v == 0:
+        return "0"
+    if v < 0:
+        v = abs(v)
+    order = floor(log10(v)) if v > 0 else 0
+    decimals = max(0, sig - order - 1)
+    rounded = round(v, decimals)
+    if rounded >= 1000:
+        return f"{rounded:.0f}"
+    if decimals == 0:
+        return str(int(rounded))
+    s = f"{rounded:.{decimals}f}".rstrip("0").rstrip(".")
+    return s
 
 
-def format_compact(n: float) -> str:
+def format_value_parts(n: float) -> tuple[str, str]:
+    """
+    Returns (number_str, unit) with max 4 significant digits.
+    Units: '' | K | M | B | T. Auto-upgrade if rounds to 1000.
+    """
     n = abs(float(n))
-    if n >= 1e9:
-        x = n / 1e9
-        return f"{x:.2f}".rstrip("0").rstrip(".") + "B"
-    if n >= 1e6:
-        x = n / 1e6
-        return f"{x:.2f}".rstrip("0").rstrip(".") + "M"
-    if n >= 1e3:
-        x = n / 1e3
-        return f"{x:.2f}".rstrip("0").rstrip(".") + "K"
-    return str(int(round(n)))
+    if n < 1000:
+        return str(int(round(n))), ""
+
+    chain = [
+        ("K", 1e3),
+        ("M", 1e6),
+        ("B", 1e9),
+        ("T", 1e12),
+    ]
+    # pick largest unit where n >= div
+    idx = 0
+    for i, (unit, div) in enumerate(chain):
+        if n >= div:
+            idx = i
+    unit, div = chain[idx]
+    s = _sig_str(n / div, 4)
+    try:
+        fv = float(s)
+    except ValueError:
+        fv = n / div
+    # upgrade if >= 1000
+    while fv >= 1000 - 1e-9 and idx + 1 < len(chain):
+        idx += 1
+        unit, div = chain[idx]
+        s = _sig_str(n / div, 4)
+        try:
+            fv = float(s)
+        except ValueError:
+            break
+    return s, unit
+
+
+def _draw_value(
+    draw: ImageDraw.ImageDraw,
+    xy: tuple[int, int],
+    n: float,
+    *,
+    num_size: int,
+    color: tuple[int, int, int],
+    anchor: str = "lt",
+    max_width: int | None = None,
+) -> tuple[int, int]:
+    """
+    Draw number + unit (unit ~55-60% height, baseline-aligned).
+    Returns (width, height) of drawn block.
+    """
+    num_s, unit = format_value_parts(n)
+    size = num_size
+    f_num = _font(size, "num")
+    f_unit = _font(max(10, int(size * 0.58)), "unit")
+
+    def measure(fn, fu):
+        nb = draw.textbbox((0, 0), num_s, font=fn)
+        nw = nb[2] - nb[0]
+        nh = nb[3] - nb[1]
+        if unit:
+            ub = draw.textbbox((0, 0), unit, font=fu)
+            uw = ub[2] - ub[0]
+            uh = ub[3] - ub[1]
+        else:
+            uw = uh = 0
+        gap = max(2, size // 12) if unit else 0
+        return nw + gap + uw, max(nh, uh), nw, gap
+
+    w, h, nw, gap = measure(f_num, f_unit)
+    while max_width is not None and w > max_width and size > 14:
+        size -= 1
+        f_num = _font(size, "num")
+        f_unit = _font(max(9, int(size * 0.58)), "unit")
+        w, h, nw, gap = measure(f_num, f_unit)
+
+    ax, ay = xy
+    if anchor == "mm":
+        x, y = ax - w // 2, ay - h // 2
+    elif anchor == "lm":
+        x, y = ax, ay - h // 2
+    elif anchor == "rm":
+        x, y = ax - w, ay - h // 2
+    else:  # lt
+        x, y = ax, ay
+
+    num_bb = draw.textbbox((0, 0), num_s, font=f_num)
+    num_h = num_bb[3] - num_bb[1]
+    draw.text((x, y), num_s, font=f_num, fill=color)
+    if unit:
+        unit_bb = draw.textbbox((0, 0), unit, font=f_unit)
+        unit_h = unit_bb[3] - unit_bb[1]
+        ux = x + nw + gap
+        uy = y + num_h - unit_h
+        draw.text((ux, uy), unit, font=f_unit, fill=color)
+    return w, h
 
 
 def _round_rect(draw: ImageDraw.ImageDraw, box, radius: int, **kwargs) -> None:
@@ -127,182 +235,254 @@ def _round_rect(draw: ImageDraw.ImageDraw, box, radius: int, **kwargs) -> None:
         draw.rectangle(box, **kwargs)
 
 
+def quantize_exact_bwr(img: Image.Image) -> Image.Image:
+    """Force pure #FFFFFF / #000000 / #D71920 only."""
+    img = img.convert("RGB")
+    px = img.load()
+    w, h = img.size
+    for y in range(h):
+        for x in range(w):
+            r, g, b = px[x, y]
+            # red if R dominant
+            if r > 140 and r > g * 1.25 and r > b * 1.25:
+                px[x, y] = RED
+            elif 0.299 * r + 0.587 * g + 0.114 * b < 140:
+                px[x, y] = BLACK
+            else:
+                px[x, y] = WHITE
+    return img
+
+
 def render_token(width: int, height: int, data: dict[str, Any]) -> Image.Image:
     """
-    Layout (reference):
-      - black header: AI TOKEN | date
-      - TOTAL USED card with huge centered number + short red underline
-      - 2×2 cards: icon | value | pct%  + red progress bar
-      - no LIMIT/RESET footer, no vendor name text
+    data keys from fetch_dashboard_usage:
+      total_30d, today_total, codex_30d, grok_30d,
+      codex_pct, grok_pct, daily[30], start_label, end_label
     """
+    assert width == 400 and height == 300, "canvas must be 400×300"
     img = Image.new("RGB", (width, height), WHITE)
     draw = ImageDraw.Draw(img)
-    s = min(width / 400.0, height / 300.0)
 
-    total = _num(data.get("total", 0))
-    limit = max(1.0, _num(data.get("limit", 1)))
-    providers = [
-        ("CODEX", _num(data.get("codex", 0))),
-        ("CLAUDE", _num(data.get("claude", 0))),
-        ("GROK", _num(data.get("grok", 0))),
-        ("DEEPSEEK", _num(data.get("deepseek", 0))),
-    ]
-    psum = sum(v for _, v in providers) or 1.0
-    providers = [(n, v, round(v / psum * 100)) for n, v in providers]
+    margin = 4
+    gap = 5
+    border = 2
+    card_r = 7
+    bar_r = 3
 
-    m = max(6, round(8 * s))
-    header_h = max(30, round(38 * s))
-    gap = max(5, round(7 * s))
-    radius = max(6, round(8 * s))
-    border = max(2, round(2.5 * s))
+    total_30d = float(data.get("total_30d") or data.get("total") or 0)
+    today_total = float(data.get("today_total") or 0)
+    codex_30d = float(data.get("codex_30d") or data.get("codex") or 0)
+    grok_30d = float(data.get("grok_30d") or data.get("grok") or 0)
+    codex_pct = int(data.get("codex_pct") or 0)
+    grok_pct = int(data.get("grok_pct") or 0)
+    if codex_30d + grok_30d > 0 and (codex_pct + grok_pct != 100):
+        codex_pct = round(codex_30d / (codex_30d + grok_30d) * 100)
+        grok_pct = 100 - codex_pct
 
-    # —— Header ——
-    draw.rectangle([0, 0, width, header_h], fill=BLACK)
-    f_head = _font(max(15, round(18 * s)))
-    draw.text((m, header_h // 2), "AI TOKEN", fill=WHITE, font=f_head, anchor="lm")
-    date_label = str(data.get("date_label") or "").strip()
-    if not date_label:
-        now = datetime.now()
-        date_label = f"{MONTHS[now.month - 1]} {now.day}"
-    draw.text(
-        (width - m, header_h // 2), date_label, fill=WHITE, font=f_head, anchor="rm"
-    )
+    daily = list(data.get("daily") or [0] * 30)
+    if len(daily) < 30:
+        daily = [0] * (30 - len(daily)) + daily
+    daily = daily[-30:]
+    start_label = str(data.get("start_label") or "")
+    end_label = str(data.get("end_label") or "")
 
-    # —— TOTAL USED card ——
-    total_x0 = m
-    total_y0 = header_h + gap
-    total_x1 = width - m
-    total_h = max(72, round(88 * s))
-    total_y1 = total_y0 + total_h
+    # —— Top card 392×200 @ (4,4) ——
+    top_x, top_y = margin, margin
+    top_w, top_h = width - margin * 2, 200
     _round_rect(
         draw,
-        [total_x0, total_y0, total_x1, total_y1],
-        radius,
+        [top_x, top_y, top_x + top_w, top_y + top_h],
+        card_r,
         outline=BLACK,
         width=border,
     )
 
-    f_total_label = _font(max(13, round(15 * s)))
-    draw.text(
-        (total_x0 + round(12 * s), total_y0 + round(10 * s)),
-        "TOTAL USED",
-        fill=BLACK,
-        font=f_total_label,
+    # metrics row height ~78
+    metrics_h = 78
+    split_x = top_x + int(top_w * 0.56)
+    # vertical divider
+    div_top = top_y + 14
+    div_bot = top_y + metrics_h - 8
+    draw.line([(split_x, div_top), (split_x, div_bot)], fill=BLACK, width=2)
+
+    f_lab = _font(13, "label")
+    # LEFT: 30D TOTAL
+    draw.text((top_x + 12, top_y + 10), "30D TOTAL", font=f_lab, fill=BLACK)
+    _draw_value(
+        draw,
+        (top_x + 12, top_y + 32),
+        total_30d,
+        num_size=42,
+        color=BLACK,
         anchor="lt",
+        max_width=split_x - top_x - 24,
     )
 
-    total_text = format_compact(total)
-    f_huge = _font(max(40, round(52 * s)))
-    cx = (total_x0 + total_x1) // 2
-    cy = total_y0 + total_h // 2 + round(6 * s)
-    draw.text((cx, cy), total_text, fill=BLACK, font=f_huge, anchor="mm")
-
-    # short red underline under number
-    tw = draw.textlength(total_text, font=f_huge)
-    ul_w = max(28, int(tw * 0.28))
-    ul_h = max(3, round(4 * s))
-    ul_y = cy + round(f_huge.size * 0.42) if hasattr(f_huge, "size") else cy + round(22 * s)
-    # approximate descender space
-    ul_y = cy + max(18, round(26 * s))
-    draw.rectangle(
-        [cx - ul_w // 2, ul_y, cx + ul_w // 2, ul_y + ul_h],
-        fill=RED,
+    # RIGHT: TODAY (red)
+    draw.text((split_x + 14, top_y + 10), "TODAY", font=f_lab, fill=BLACK)
+    _draw_value(
+        draw,
+        (split_x + 14, top_y + 32),
+        today_total,
+        num_size=42,
+        color=RED,
+        anchor="lt",
+        max_width=top_x + top_w - split_x - 26,
     )
 
-    # —— 2×2 provider cards ——
-    grid_top = total_y1 + gap
-    grid_bot = height - m
-    grid_left = m
-    grid_right = width - m
-    grid_w = grid_right - grid_left
-    grid_h = grid_bot - grid_top
-    cell_w = (grid_w - gap) / 2
-    cell_h = (grid_h - gap) / 2
+    # —— Bar chart area ——
+    chart_top = top_y + metrics_h
+    chart_bot = top_y + top_h - 22
+    chart_left = top_x + 14
+    chart_right = top_x + top_w - 14
+    chart_w = chart_right - chart_left
+    chart_h = chart_bot - chart_top
 
-    cells = [
-        (grid_left, grid_top),
-        (grid_left + cell_w + gap, grid_top),
-        (grid_left, grid_top + cell_h + gap),
-        (grid_left + cell_w + gap, grid_top + cell_h + gap),
-    ]
+    n_bars = 30
+    gap_b = 2
+    bar_w = max(2, (chart_w - gap_b * (n_bars - 1)) // n_bars)
+    # recompute to fill width evenly
+    total_bars_w = bar_w * n_bars + gap_b * (n_bars - 1)
+    chart_left = top_x + 14 + (chart_w - total_bars_w) // 2
 
-    f_val = _font(max(18, round(24 * s)))
-    f_pct = _font(max(12, round(14 * s)))
-    icon_size = max(28, round(34 * s))
-    # reserve fixed right gutter so "100%" never collides with value
-    pct_gutter = max(36, round(44 * s))
+    max_v = max(daily) if daily else 1
+    if max_v <= 0:
+        max_v = 1
 
-    for (name, val, pct), (cx0, cy0) in zip(providers, cells):
-        x0, y0 = int(cx0), int(cy0)
-        x1, y1 = int(cx0 + cell_w), int(cy0 + cell_h)
-        _round_rect(draw, [x0, y0, x1, y1], radius, outline=BLACK, width=border)
+    for i, v in enumerate(daily):
+        is_recent5 = i >= n_bars - 5
+        is_today = i == n_bars - 1
+        bw = bar_w + (1 if is_today else 0)
+        x = chart_left + i * (bar_w + gap_b)
+        if is_today:
+            x = chart_left + i * (bar_w + gap_b) - 0  # keep grid
+        h = max(2, int(chart_h * (v / max_v)))
+        if is_today:
+            h = min(chart_h, int(h * 1.08) + 2)  # slightly taller
+        y1 = chart_bot
+        y0 = y1 - h
+        color = RED if is_recent5 else BLACK
+        draw.rectangle([x, y0, x + bw - 1, y1 - 1], fill=color)
 
-        pad = max(8, round(10 * s))
-        bar_h = max(8, round(10 * s))
-        bar_y = y1 - pad - bar_h
-        content_mid_y = (y0 + bar_y) // 2
+    # date labels under chart
+    f_date = _font(11, "unit")
+    draw.text((top_x + 12, top_y + top_h - 16), start_label, font=f_date, fill=BLACK)
+    eb = draw.textbbox((0, 0), end_label, font=f_date)
+    ew = eb[2] - eb[0]
+    draw.text(
+        (top_x + top_w - 12 - ew, top_y + top_h - 16),
+        end_label,
+        font=f_date,
+        fill=BLACK,
+    )
 
-        stem = ICON_STEM.get(name, "")
-        icon = load_icon(stem, icon_size) if stem else None
-        icon_x = x0 + pad
-        if icon is not None:
-            icon_y = content_mid_y - icon_size // 2
-            _paste_icon(img, icon, (icon_x, icon_y))
-            text_left = icon_x + icon_size + round(8 * s)
-        else:
-            text_left = x0 + pad
+    # —— Bottom vendor cards ——
+    bottom_y = top_y + top_h + gap
+    bottom_h = height - margin - bottom_y  # ~88
+    card_w = (width - margin * 2 - gap) // 2
 
-        # percentage: fixed right column
-        pct_s = f"{pct}%"
-        pct_right = x1 - pad
-        draw.text(
-            (pct_right, content_mid_y),
-            pct_s,
-            fill=BLACK,
-            font=f_pct,
-            anchor="rm",
+    _draw_vendor_card(
+        img,
+        draw,
+        margin,
+        bottom_y,
+        card_w,
+        bottom_h,
+        stem="openai",
+        tokens=codex_30d,
+        pct=codex_pct,
+        border=border,
+        card_r=card_r,
+        bar_r=bar_r,
+    )
+    _draw_vendor_card(
+        img,
+        draw,
+        margin + card_w + gap,
+        bottom_y,
+        card_w,
+        bottom_h,
+        stem="grok",
+        tokens=grok_30d,
+        pct=grok_pct,
+        border=border,
+        card_r=card_r,
+        bar_r=bar_r,
+    )
+
+    return quantize_exact_bwr(img)
+
+
+def _draw_vendor_card(
+    img: Image.Image,
+    draw: ImageDraw.ImageDraw,
+    x: int,
+    y: int,
+    w: int,
+    h: int,
+    *,
+    stem: str,
+    tokens: float,
+    pct: int,
+    border: int,
+    card_r: int,
+    bar_r: int,
+) -> None:
+    _round_rect(draw, [x, y, x + w, y + h], card_r, outline=BLACK, width=border)
+
+    pad = 10
+    icon_size = 34
+    bar_h = 10
+    bar_y = y + h - pad - bar_h
+    mid_y = (y + pad + bar_y) // 2
+
+    icon = load_icon(stem, icon_size)
+    text_left = x + pad
+    if icon is not None:
+        iy = mid_y - icon_size // 2
+        img.paste(icon, (x + pad, iy), icon)
+        text_left = x + pad + icon_size + 10
+
+    # percent fixed right gutter
+    pct_gutter = 42
+    f_pct = _font(14, "unit")
+    pct_s = f"{int(pct)}%"
+    pb = draw.textbbox((0, 0), pct_s, font=f_pct)
+    pw = pb[2] - pb[0]
+    ph = pb[3] - pb[1]
+    draw.text(
+        (x + w - pad - pw, mid_y - ph // 2),
+        pct_s,
+        font=f_pct,
+        fill=BLACK,
+    )
+
+    max_w = max(20, x + w - pad - pct_gutter - text_left)
+    _draw_value(
+        draw,
+        (text_left, mid_y),
+        tokens,
+        num_size=26,
+        color=BLACK,
+        anchor="lm",
+        max_width=max_w,
+    )
+
+    # progress bar
+    bar_x0 = x + pad
+    bar_x1 = x + w - pad
+    bar_w = bar_x1 - bar_x0
+    _round_rect(
+        draw,
+        [bar_x0, bar_y, bar_x1, bar_y + bar_h],
+        bar_r,
+        outline=BLACK,
+        width=1,
+    )
+    fill_w = int(bar_w * min(100, max(0, pct)) / 100)
+    if fill_w > 2:
+        # fill inside outline
+        draw.rectangle(
+            [bar_x0 + 1, bar_y + 1, bar_x0 + fill_w - 1, bar_y + bar_h - 1],
+            fill=RED,
         )
-
-        # value: between icon and pct gutter; shrink font if still too wide
-        val_s = format_compact(val)
-        val_max_right = x1 - pad - pct_gutter
-        val_max_w = max(20, val_max_right - text_left)
-        font_val = f_val
-        size = max(14, round(24 * s))
-        while draw.textlength(val_s, font=font_val) > val_max_w and size > 12:
-            size -= 1
-            font_val = _font(size)
-        # clip draw area by not extending into gutter (text may still overflow tiny bit)
-        draw.text(
-            (text_left, content_mid_y),
-            val_s,
-            fill=BLACK,
-            font=font_val,
-            anchor="lm",
-        )
-
-        # progress bar
-        bar_x0 = x0 + pad
-        bar_x1 = x1 - pad
-        bar_w = bar_x1 - bar_x0
-        _round_rect(
-            draw,
-            [bar_x0, bar_y, bar_x1, bar_y + bar_h],
-            max(2, bar_h // 2),
-            outline=BLACK,
-            width=max(1, border - 1),
-        )
-        fill_w = int(bar_w * min(100, pct) / 100)
-        if fill_w > 2:
-            inset = 1
-            draw.rectangle(
-                [
-                    bar_x0 + inset,
-                    bar_y + inset,
-                    bar_x0 + max(inset + 1, fill_w - inset),
-                    bar_y + bar_h - inset,
-                ],
-                fill=RED,
-            )
-
-    return img

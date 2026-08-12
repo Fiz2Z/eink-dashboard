@@ -245,8 +245,13 @@ class EpdBleClient:
                 log.warning("写包重试 %s/%s: %s", attempt + 1, retries, e)
         raise RuntimeError(f"写包失败: {last}")
 
-    def _chunk_size(self) -> int:
-        safe = min(self.mtu or 244, 185)
+    def _chunk_size(self, conservative: bool = True) -> int:
+        # Windows BLE is flaky with large/no-response bursts; keep chunks small.
+        mtu = self.mtu or 244
+        if conservative:
+            safe = min(mtu, 120)
+            return max(16, safe - 8)
+        safe = min(mtu, 185)
         return max(16, safe - 5)
 
     async def push_planes(
@@ -256,7 +261,8 @@ class EpdBleClient:
         *,
         three_color: bool = True,
         interleaved: int = 0,
-        chunk_delay: float = 0.004,
+        chunk_delay: float = 0.012,
+        settle_after_refresh: float = 18.0,
         on_progress: Callable[[int, int, str], None] | None = None,
     ) -> None:
         if three_color and red is None:
@@ -264,16 +270,21 @@ class EpdBleClient:
         if red is not None and len(red) != len(bw):
             raise ValueError("bw/red 长度必须一致")
 
-        chunk = self._chunk_size()
+        chunk = self._chunk_size(conservative=True)
+        planes = 2 if three_color else 1
         log.info(
-            "Push: %s bytes/plane, chunk=%s, three_color=%s, interleaved=%s",
+            "Push: %s bytes/plane × %s, chunk=%s, three_color=%s, delay=%.0fms",
             len(bw),
+            planes,
             chunk,
             three_color,
-            interleaved,
+            chunk_delay * 1000,
         )
+        if not self._client or not self._client.is_connected:
+            raise RuntimeError("未连接")
+
         await self._write_retry(CMD_INIT, with_response=True)
-        await asyncio.sleep(0.2)
+        await asyncio.sleep(0.35)
 
         await self._push_plane(
             bw,
@@ -283,7 +294,11 @@ class EpdBleClient:
             chunk_delay=chunk_delay,
             on_progress=on_progress,
         )
+        await asyncio.sleep(0.15)
+
         if three_color and red is not None:
+            if not self._client or not self._client.is_connected:
+                raise RuntimeError("黑白面传完后连接已断开，红通道未发送 — 请靠近重试")
             await self._push_plane(
                 red,
                 red=True,
@@ -292,10 +307,19 @@ class EpdBleClient:
                 chunk_delay=chunk_delay,
                 on_progress=on_progress,
             )
+            await asyncio.sleep(0.15)
 
-        await asyncio.sleep(0.05)
+        if not self._client or not self._client.is_connected:
+            raise RuntimeError("传图完成前连接已断开，未发送 REFRESH — 屏可能停在半刷状态")
+
         await self._write_retry(CMD_REFRESH, with_response=True)
-        log.info("REFRESH sent — wait for panel update, then device may sleep.")
+        log.info(
+            "REFRESH 已发送。墨水屏全刷大约需要 10–20 秒，请勿断电/移动，等待 %.0f 秒…",
+            settle_after_refresh,
+        )
+        # Stay connected if possible so stack doesn't abort mid-refresh on some firmwares
+        await asyncio.sleep(settle_after_refresh)
+        log.info("等待结束。若画面仍异常，可再 push 一次或改用 --color-mode bw 试黑白。")
 
     async def _push_plane(
         self,
@@ -309,15 +333,18 @@ class EpdBleClient:
     ) -> None:
         label = "red" if red else "bw"
         total = max(1, (len(plane) + chunk - 1) // chunk)
+        # Default: every packet with response (interleaved=0)
         no_reply = interleaved
-        log.info("Plane %s: %s chunks", label, total)
+        log.info("Plane %s: %s chunks (%s bytes)", label, total, len(plane))
         for i in range(total):
+            if not self._client or not self._client.is_connected:
+                raise RuntimeError(f"{label} 传图中途断开 ({i}/{total})")
             piece = plane[i * chunk : (i + 1) * chunk]
             flag = write_img_flag(i == 0, red=red)
             body = bytes([flag]) + piece
             with_response = interleaved <= 0 or no_reply <= 0
             await self._write_retry(
-                CMD_WRITE_IMG, body, with_response=with_response, retries=4
+                CMD_WRITE_IMG, body, with_response=with_response, retries=6
             )
             if with_response:
                 no_reply = interleaved
@@ -325,8 +352,9 @@ class EpdBleClient:
                 no_reply -= 1
             if chunk_delay > 0:
                 await asyncio.sleep(chunk_delay)
-            if on_progress and (i + 1 == total or (i + 1) % 5 == 0):
+            if on_progress and (i + 1 == total or (i + 1) % 10 == 0 or i == 0):
                 on_progress(i + 1, total, label)
+        log.info("Plane %s complete (%s/%s)", label, total, total)
 
     async def disconnect(self) -> None:
         client = self._client
