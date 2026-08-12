@@ -253,31 +253,56 @@ export const tokenTemplate = {
 };
 
 function drawVendor(ctx, x, y, w, h, key, tokens, pct, border, cardR) {
+  // icon + number share one vertical center line above the progress bar
   strokeRoundRect(ctx, x, y, w, h, cardR, border);
   const pad = 10;
-  const iconSize = 34;
+  const iconSize = 38;
+  const iconGap = 10;
   const barH = 10;
   const barY = y + h - pad - barH;
-  const midY = Math.floor((y + pad + barY) / 2);
-  const pctGutter = 42;
+  const midY = Math.floor((y + pad + barY - 4) / 2);
+  const pctGutter = 44;
 
   const img = iconCache.get(ICON_PATHS[key]);
   let textLeft = x + pad;
   if (img && img.complete) {
     ctx.drawImage(img, x + pad, midY - iconSize / 2, iconSize, iconSize);
-    textLeft = x + pad + iconSize + 10;
+    textLeft = x + pad + iconSize + iconGap;
   }
 
-  setFont(ctx, 14, "700");
+  setFont(ctx, 15, "700");
   ctx.fillStyle = BLACK;
   ctx.textBaseline = "middle";
   const pctS = `${pct}%`;
   const pw = ctx.measureText(pctS).width;
   ctx.fillText(pctS, x + w - pad - pw, midY);
 
-  ctx.textBaseline = "alphabetic";
-  const maxW = Math.max(20, x + w - pad - pctGutter - textLeft);
-  drawValue(ctx, textLeft, midY + 6, tokens, 26, BLACK, maxW);
+  // number + unit on same midY (middle baseline)
+  let [numS, unit] = formatValueParts(tokens);
+  let size = 28;
+  const maxW = Math.max(24, x + w - pad - pctGutter - textLeft);
+  setFont(ctx, size, "800");
+  const measure = () => {
+    setFont(ctx, size, "800");
+    const nw = ctx.measureText(numS).width;
+    const us = Math.max(12, Math.round(size * 0.58));
+    setFont(ctx, us, "700");
+    const uw = unit ? ctx.measureText(unit).width : 0;
+    const gap = unit ? Math.max(2, size / 12) : 0;
+    return nw + gap + uw;
+  };
+  while (measure() > maxW && size > 14) size -= 1;
+
+  setFont(ctx, size, "800");
+  ctx.textBaseline = "middle";
+  ctx.fillStyle = BLACK;
+  ctx.fillText(numS, textLeft, midY);
+  if (unit) {
+    const nw = ctx.measureText(numS).width;
+    const us = Math.max(12, Math.round(size * 0.58));
+    setFont(ctx, us, "700");
+    ctx.fillText(unit, textLeft + nw + Math.max(2, size / 12), midY);
+  }
 
   strokeRoundRect(ctx, x + pad, barY, w - pad * 2, barH, 3, 1);
   const fillW = Math.floor(((w - pad * 2) * Math.min(100, pct)) / 100);

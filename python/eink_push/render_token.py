@@ -428,45 +428,98 @@ def _draw_vendor_card(
     card_r: int,
     bar_r: int,
 ) -> None:
+    """
+    Row layout (single horizontal center line above progress bar):
+      [ icon 38px ] --10px-- [ number + unit ] ........ [ pct% ]
+    Icon and token number share the same vertical midpoint.
+    """
     _round_rect(draw, [x, y, x + w, y + h], card_r, outline=BLACK, width=border)
 
     pad = 10
-    icon_size = 34
+    icon_size = 38
+    icon_gap = 10  # icon → number
     bar_h = 10
     bar_y = y + h - pad - bar_h
-    mid_y = (y + pad + bar_y) // 2
+    # content band above bar
+    content_top = y + pad
+    content_bot = bar_y - 4
+    mid_y = (content_top + content_bot) // 2
 
+    # —— icon (vertically centered on mid_y) ——
     icon = load_icon(stem, icon_size)
     text_left = x + pad
     if icon is not None:
         iy = mid_y - icon_size // 2
         img.paste(icon, (x + pad, iy), icon)
-        text_left = x + pad + icon_size + 10
+        text_left = x + pad + icon_size + icon_gap
 
-    # percent fixed right gutter
-    pct_gutter = 42
-    f_pct = _font(14, "unit")
+    # —— percent: fixed right, same mid_y ——
+    pct_gutter = 44
+    f_pct = _font(15, "unit")
     pct_s = f"{int(pct)}%"
-    pb = draw.textbbox((0, 0), pct_s, font=f_pct)
-    pw = pb[2] - pb[0]
-    ph = pb[3] - pb[1]
-    draw.text(
-        (x + w - pad - pw, mid_y - ph // 2),
-        pct_s,
-        font=f_pct,
-        fill=BLACK,
-    )
+    try:
+        draw.text(
+            (x + w - pad, mid_y),
+            pct_s,
+            font=f_pct,
+            fill=BLACK,
+            anchor="rm",
+        )
+    except TypeError:
+        pb = draw.textbbox((0, 0), pct_s, font=f_pct)
+        pw, ph = pb[2] - pb[0], pb[3] - pb[1]
+        draw.text((x + w - pad - pw, mid_y - ph // 2), pct_s, font=f_pct, fill=BLACK)
 
-    max_w = max(20, x + w - pad - pct_gutter - text_left)
-    _draw_value(
-        draw,
-        (text_left, mid_y),
-        tokens,
-        num_size=26,
-        color=BLACK,
-        anchor="lm",
-        max_width=max_w,
-    )
+    # —— token number + unit, left-middle on mid_y (same horizontal line as icon) ——
+    max_w = max(24, x + w - pad - pct_gutter - text_left)
+    num_s, unit = format_value_parts(tokens)
+    size = 28
+    f_num = _font(size, "num")
+    f_unit = _font(max(12, int(size * 0.58)), "unit")
+
+    def _w(fn, fu):
+        nb = draw.textbbox((0, 0), num_s, font=fn)
+        nw = nb[2] - nb[0]
+        if unit:
+            ub = draw.textbbox((0, 0), unit, font=fu)
+            return nw + max(2, size // 12) + (ub[2] - ub[0])
+        return nw
+
+    while _w(f_num, f_unit) > max_w and size > 14:
+        size -= 1
+        f_num = _font(size, "num")
+        f_unit = _font(max(10, int(size * 0.58)), "unit")
+
+    gap_u = max(2, size // 12) if unit else 0
+    try:
+        # Pillow anchor: left-middle — same center line as icon
+        draw.text((text_left, mid_y), num_s, font=f_num, fill=BLACK, anchor="lm")
+        if unit:
+            nw = draw.textbbox((0, 0), num_s, font=f_num)[2] - draw.textbbox((0, 0), num_s, font=f_num)[0]
+            # unit: left-middle, slightly lower optical baseline with smaller font still centered
+            draw.text(
+                (text_left + nw + gap_u, mid_y),
+                unit,
+                font=f_unit,
+                fill=BLACK,
+                anchor="lm",
+            )
+    except TypeError:
+        # fallback without anchor
+        nb = draw.textbbox((0, 0), num_s, font=f_num)
+        nh = nb[3] - nb[1]
+        ty = mid_y - nh // 2 - nb[1]
+        draw.text((text_left, ty), num_s, font=f_num, fill=BLACK)
+        if unit:
+            nw = nb[2] - nb[0]
+            ub = draw.textbbox((0, 0), unit, font=f_unit)
+            uh = ub[3] - ub[1]
+            draw.text(
+                (text_left + nw + gap_u, mid_y - uh // 2 - ub[1]),
+                unit,
+                font=f_unit,
+                fill=BLACK,
+            )
 
     # progress bar
     bar_x0 = x + pad
@@ -481,7 +534,6 @@ def _draw_vendor_card(
     )
     fill_w = int(bar_w * min(100, max(0, pct)) / 100)
     if fill_w > 2:
-        # fill inside outline
         draw.rectangle(
             [bar_x0 + 1, bar_y + 1, bar_x0 + fill_w - 1, bar_y + bar_h - 1],
             fill=RED,
